@@ -21,25 +21,29 @@ pip install inch
 Here's an example of how to use Inch to execute a simple task:
 
 ```python
-from inch import Inch, Task
+from inch import Inch, InchPoolExecutor
+import random
+from time import sleep
 
-class TestTask(Task):
-
-    def __init__(self, name: str, total: int):
-        super().__init__(name, total)
-        self.progress = 0
-
-    def run(self):
-        while self.progress < self.total:
-            self.progress += random.randint(1, 200)
+class TestTask(Inch):
+    def __call__(self):
+        while self.completed < self.total:
+            self.completed += random.randint(1, 200)
             sleep(0.1)
 
-    def get_progress(self) -> int:
-        return self.progress
+class TestTaskNoProgress(Inch):
 
-inch = Inch(max_workers=8)
-for i in range(20):
-    inch.add_task(TestTask(name=f"Task {i+1}", total=1000))
+    def __call__(self):
+        completed = 0
+        while completed < 1200:
+            completed += random.randint(1, 200)
+            sleep(0.1)
 
-inch.run()
+with InchPoolExecutor() as executor:
+    for i in range(20):
+        if i % 5 == 0:
+            executor.start_inch(TestTaskNoProgress(name=f"Task {i+1}"))
+        else:
+            executor.start_inch(TestTask(name=f"Task {i+1}", total=1000))
+
 ```

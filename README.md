@@ -2,6 +2,10 @@
 
 Inch is a Python library specifically designed to manage and execute long-running tasks in batches using multithreading. It enhances the user experience by providing a visual progress display through the rich library. The name "Inch" reflects its core functionality, enabling tasks to "move along slowly and carefully," thus ensuring a systematic and controlled execution process.
 
+## DEMO
+
+[Online Demo](https://asciinema.org/a/687421)
+
 ## Features
 
 - Define concurrent tasks using an abstract base class.
@@ -14,6 +18,12 @@ Inch can be installed using pip:
 
 ```bash
 pip install inch
+```
+
+Show demo:
+
+```bash
+python -m inch
 ```
 
 ## Usage

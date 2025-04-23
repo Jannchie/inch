@@ -2,25 +2,39 @@
 name = "inch"
 version = "0.1.0"
 description = "Add your description here"
-authors = [
-    { name = "Jianqi Pan", email = "jannchie@gmail.com" }
-]
-dependencies = [
-    "rich>=13.9.2",
-]
+authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 readme = "README.md"
-requires-python = ">= 3.12"
+requires-python = ">=3.10"
+dependencies = ["rich>=13.9.2"]
+
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.rye]
-managed = true
-dev-dependencies = []
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[tool.ruff]
+select = ["ALL"]
+exclude = [".venv"]
+ignore = [
+    "ANN401",
+    "PGH",
+    "RUF003",
+    "BLE001",
+    "ERA001",
+    "FIX002",
+    "TD002",
+    "TD003",
+    "D",
+    "A004",
+    "ANN201",
+    "B008",
+    "FAST002",
+    "INP001",
+    "S311",
+    "PLR2004",
+]
+line-length = 160
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/inch"]
+[dependency-groups]
+dev = ["ruff>=0.11.6"]

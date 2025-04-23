@@ -1,10 +1,12 @@
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from queue import Queue
 
 from rich import get_console
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -16,8 +18,6 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-
-console = get_console()
 
 
 class Inch(ABC):
@@ -31,9 +31,22 @@ class Inch(ABC):
         pass
 
 
-# Inch class handling task execution and progress
+class FuncInch(Inch):
+    def __init__(self, func: Callable, *args: tuple, **kwargs: dict) -> None:
+        super().__init__(name=func.__name__)
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __call__(self) -> None:
+        self.func(*self.args, **self.kwargs)
+
+
 class InchPoolExecutor:
-    def __init__(self, name: str = "Inch", max_workers: int = 8) -> None:
+    def __init__(self, name: str = "Inch", max_workers: int = 8, console: Console = None) -> None:
+        if console is None:
+            console = get_console()
+        self.console = console
         self.__progress: Progress = Progress(
             SpinnerColumn(style="yellow"),
             TextColumn(" {task.description}"),
@@ -56,7 +69,7 @@ class InchPoolExecutor:
     def __enter__(self) -> "InchPoolExecutor":
         # Initialize the progress bar
         self.started_at = datetime.now(UTC)
-        console.print(f":rocket: Start running [bold]{self.name}[/bold]...")
+        self.console.print(f":rocket: Start running [bold]{self.name}[/bold]...")
         self.__initialize_overall_progress()
         self.progress_thread = threading.Thread(target=self.__update_task_progress, daemon=True)
         self.__main_thread = threading.Thread(target=self.__run_tasks, daemon=True)
@@ -69,13 +82,22 @@ class InchPoolExecutor:
         self.__main_thread.join()
         self.progress_thread.join()
         self.finished_at = datetime.now(UTC)
-        console.print(f":white_check_mark: Finished in {self.finished_at - self.started_at}")
+        self.console.print(f":white_check_mark: Finished in {self.finished_at - self.started_at}")
 
-    def start_inch(self, task: Inch) -> None:
+    def start_inch(self, task: Inch | Callable, *args: tuple, **kwargs: dict) -> None:
         self.__total_task_count += 1
-        if overall_task := self.__progress.tasks[self.__overall_task_id]:
-            overall_task.total = self.__total_task_count
-        self.__pending_tasks.put(task)
+        if isinstance(task, Inch):
+            if overall_task := self.__progress.tasks[self.__overall_task_id]:
+                overall_task.total = self.__total_task_count
+            self.__pending_tasks.put(task)
+        elif callable(task):
+            task_instance = FuncInch(task, *args, **kwargs)
+            if overall_task := self.__progress.tasks[self.__overall_task_id]:
+                overall_task.total = self.__total_task_count
+            self.__pending_tasks.put(task_instance)
+        else:
+            msg = "task must be an instance of Inch or a callable function"
+            raise TypeError(msg)
 
     def __initialize_overall_progress(self) -> None:
         # Adding the overall progress bar
@@ -102,7 +124,7 @@ class InchPoolExecutor:
             try:
                 task()
             except Exception as e:
-                console.print(f"Task {task.name} failed: {e}")
+                self.console.print(f"Task {task.name} failed: {e}")
             self.__progress.update(task_id, completed=task.total)
 
             # Update the global progress bar when a task is completed
@@ -113,7 +135,6 @@ class InchPoolExecutor:
             if task_id in self.__running_tasks:
                 del self.__running_tasks[task_id]
             self.__progress.remove_task(task_id)
-            self.__running_tasks = {k: v for k, v in self.__running_tasks.items() if v.completed != v.total}
             if not self.__running_tasks and self.__pending_tasks.empty():
                 self.__finish_event.set()
                 # Add a None to the queue to stop the worker threads

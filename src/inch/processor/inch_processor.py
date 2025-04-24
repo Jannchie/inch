@@ -40,7 +40,8 @@ class InchProcessor(Generic[TaskType]):
         self._batch_size = batch_size
         self._max_worker = max_worker
         self._target = target
-
+        self._consuming_count = 0
+        self._consuming_lock = threading.Lock()
         # Register signal handlers to gracefully stop on interruption
         self._setup_signal_handlers()
 
@@ -52,14 +53,18 @@ class InchProcessor(Generic[TaskType]):
     def consume_wrapper(self) -> None:
         while self.is_running():
             batch = self._get(self._batch_size)
+
             if batch is not None:
                 self._target(batch)
+
+            with self._consuming_lock:
+                self._consuming_count -= len(batch)
 
     def _setup_signal_handlers(self) -> None:
         """Setup signal handlers to gracefully stop the processor on interruption."""
 
         def signal_handler(*_arg: object, **_kwargs: object) -> None:
-            if self._stop_event.is_set():
+            if not self.is_running():
                 return
             logger.info("Received stop signal, stopping processor...")
             self.stop(wait_for_completion=False)
@@ -81,7 +86,7 @@ class InchProcessor(Generic[TaskType]):
         Raises:
             RuntimeError: If the processor has been stopped, new tasks are not allowed.
         """
-        if self._stop_event.is_set():
+        if not self.is_running():
             msg = "Processor has been stopped, cannot add new tasks."
             raise RuntimeError(msg)
         self._task_queue.put(task)
@@ -104,13 +109,18 @@ class InchProcessor(Generic[TaskType]):
         batch: list[TaskType] = []
         attempt = 0
 
-        while len(batch) < batch_size and not (self._stop_event.is_set() and self._task_queue.empty()):
+        while len(batch) < batch_size and self.is_running():
             try:
-                task: TaskType = self._task_queue.get(block=False)
-                batch.append(task)
+                with self._consuming_lock:
+                    task: TaskType = self._task_queue.get(block=False)
+                    batch.append(task)
+                    self._consuming_count += 1
                 # Reset attempt counter after successful retrieval
                 attempt = 0
             except queue.Empty:  # noqa: PERF203
+                if batch:
+                    # If we have a partial batch, return it
+                    return batch
                 # Apply exponential backoff when queue is empty
                 backoff_time = self._calculate_backoff_time(attempt, max_backoff=1.0, base=2.0)
                 time.sleep(backoff_time)
@@ -172,10 +182,10 @@ class InchProcessor(Generic[TaskType]):
         # Single task mode
         if batch_size is not None:
             return self._retrieve_task_batch(batch_size)
-        while not self._stop_event.is_set():
+        while self.is_running():
             if batch := self._get_task_batch(1):
                 return batch[0]  # Return single element
-            if self._stop_event.is_set() and self._task_queue.empty():
+            if not self.is_running():
                 return None
 
         # Processor has been stopped
@@ -185,10 +195,10 @@ class InchProcessor(Generic[TaskType]):
         return final_batch[0] if final_batch else None
 
     def _retrieve_task_batch(self, batch_size: int | None = None) -> list[TaskType]:
-        while not self._stop_event.is_set():
+        while self.is_running():
             if batch := self._get_task_batch(batch_size):
                 return batch
-            if self._stop_event.is_set() and self._task_queue.empty():
+            if not self.is_running():
                 return []
             continue
         if self._task_queue.empty():
@@ -235,14 +245,13 @@ class InchProcessor(Generic[TaskType]):
             logger.debug("Waiting for existing tasks to complete...")
             start_wait = time.monotonic()
             while True:
-                if self._stop_event.is_set():
+                qsize = self._task_queue.qsize()
+                if not self.is_running():
                     logger.debug("Stop event set, exiting wait loop.")
                     break
-                qsize = self._task_queue.qsize()
-                if qsize == 0:
-                    logger.debug("Queue is empty.")
+                if qsize == 0 and self._consuming_count == 0:
+                    logger.debug("Queue is empty, all consumers have finished.")
                     break
-
                 if drain_timeout is not None and time.monotonic() - start_wait > drain_timeout:
                     logger.debug("Wait timeout (%d seconds), forcing exit.", drain_timeout)
                     break
@@ -259,7 +268,7 @@ class InchProcessor(Generic[TaskType]):
 
     def is_running(self) -> bool:
         """Checks if the processor is still running (stop flag not set)."""
-        return not self._stop_event.is_set()
+        return not self._stop_event.is_set() or self._consuming_count > 0
 
     def __enter__(self) -> "InchProcessor[TaskType]":
         """
@@ -296,7 +305,7 @@ if __name__ == "__main__":
     )
     TIMEOUT = 5
     NUM_CONSUMERS = 2
-    TASKS_PER_PRODUCER = 15
+    TASKS_PER_PRODUCER = 20
 
     # When creating an InchProcessor instance, the type checker can usually infer the type,
     # but it's better to specify explicitly: InchProcessor[str]
@@ -309,11 +318,12 @@ if __name__ == "__main__":
     #     for i in range(TASKS_PER_PRODUCER):
     #         task = f"Task-{i}"
     #         processor.put(task)
-    def consumer_func(batch: list[str]) -> None:
+
+    def c(batch: list[str]) -> None:
         logger.debug("Processing batch: %s", batch)
 
-    processor = InchProcessor[str](consumer_func, batch_size=4)
-    for i in range(14):
+    processor = InchProcessor[str](c, batch_size=4)
+    for i in range(15):
         task = f"Task-{i}"
         processor.put(task)
 

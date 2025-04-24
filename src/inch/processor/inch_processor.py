@@ -7,53 +7,53 @@ import signal
 import sys
 import threading
 import time
-from typing import Generic, overload
+from collections.abc import Callable
+from typing import Any, Generic, overload
 
 from inch.processor.logger import logger
 from inch.types import TaskType
 
 
 class InchProcessor(Generic[TaskType]):
-    """
-    A generic, type-safe producer-consumer task processor that supports retrieving tasks
-    by batch size or timeout.
-
-    Allows multiple producer threads to add tasks of type `TaskType` and multiple consumer
-    threads to retrieve tasks. When batch_size is 1, it returns a single element; when batch_size
-    is greater than 1, it returns a list of tasks. Consumers waiting for tasks will wait until
-    either the task queue reaches batch_size or timeout seconds have elapsed since the last
-    retrieval (or start of waiting).
-
-    Supports use as a context manager:
-    ```python
-    with InchProcessor[str]() as processor:
-        processor.put_task("Task1")
-        task = processor.get()
-    # stop() is automatically called when exiting the context
-    ```
-
-    Attributes:
-        batch_size (int): Target number of tasks per batch. Default is 1.
-        timeout (float): Maximum wait time for a batch (in seconds).
-        _task_queue (queue.Queue[TaskType]): Thread-safe queue for storing tasks.
-        _stop_event (threading.Event): Event for signaling stop.
-        _active_consumers (int): Tracks the number of active consumer threads.
-        _lock (threading.Lock): Used to protect the _active_consumers counter.
-    """
-
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        target: Callable[[list[TaskType]], Any],
+        batch_size: int = 1,
+        max_worker: int = 1,
+    ) -> None:
         """
         Initialize an InchProcessor instance.
         Creates a thread-safe queue for storing tasks and initializes the stop event
         and active consumer counter.
+
+        Args:
+            target: The callable to process tasks. If batch_size is None, it will receive
+                   a single TaskType item. Otherwise, it will receive a list[TaskType].
+            batch_size: The number of tasks to process in a batch. If None, tasks are processed
+                       one at a time.
+            max_worker: The number of worker threads to create. Default is 1.
         """
 
         # Use the TaskType type variable to specify the type of elements in the queue
         self._task_queue: queue.Queue[TaskType] = queue.Queue()
         self._stop_event = threading.Event()
+        self._batch_size = batch_size
+        self._max_worker = max_worker
+        self._target = target
 
         # Register signal handlers to gracefully stop on interruption
         self._setup_signal_handlers()
+
+        for _ in range(self._max_worker):
+            # Create a consumer thread for each worker
+            thread = threading.Thread(target=self.consume_wrapper, daemon=True)
+            thread.start()
+
+    def consume_wrapper(self) -> None:
+        while self.is_running():
+            batch = self._get(self._batch_size)
+            if batch is not None:
+                self._target(batch)
 
     def _setup_signal_handlers(self) -> None:
         """Setup signal handlers to gracefully stop the processor on interruption."""
@@ -119,7 +119,7 @@ class InchProcessor(Generic[TaskType]):
         return batch
 
     @overload
-    def get(self) -> TaskType | None:
+    def _get(self) -> TaskType | None:
         """
         Called by consumers to get a single task.
 
@@ -132,7 +132,7 @@ class InchProcessor(Generic[TaskType]):
         """
 
     @overload
-    def get(self, batch_size: int) -> list[TaskType]:
+    def _get(self, batch_size: int) -> list[TaskType]:
         """
         Called by consumers to get a batch of tasks of type `List[TaskType]`.
 
@@ -148,7 +148,7 @@ class InchProcessor(Generic[TaskType]):
                            returns an empty list.
         """
 
-    def get(self, batch_size: int | None = None) -> TaskType | list[TaskType] | None:
+    def _get(self, batch_size: int | None = None) -> TaskType | list[TaskType] | None:
         """
         Called by consumers to get a task or batch of tasks.
 
@@ -240,7 +240,7 @@ class InchProcessor(Generic[TaskType]):
                     break
                 qsize = self._task_queue.qsize()
                 if qsize == 0:
-                    logger.debug("Queue is empty and no active consumers.")
+                    logger.debug("Queue is empty.")
                     break
 
                 if drain_timeout is not None and time.monotonic() - start_wait > drain_timeout:
@@ -252,9 +252,6 @@ class InchProcessor(Generic[TaskType]):
         qsize = self.qsize()
         if qsize > 0:
             logger.warning("Processor stopped with %d tasks remaining in the queue.", qsize)
-
-        logger.debug("Sending stop signal...")
-        self._stop_event.set()
 
     def qsize(self) -> int:
         """Returns the approximate number of tasks in the queue."""
@@ -290,13 +287,6 @@ class InchProcessor(Generic[TaskType]):
 
 
 if __name__ == "__main__":
-
-    def consumer_func(processor: InchProcessor[str]) -> None:
-        """Consumer thread function (handles List[str] type batches)"""
-        while processor.is_running() or processor.qsize() > 0:
-            if batch := processor.get(4):
-                logger.debug("Consumer thread: Processing batch: %s", batch)
-
     from rich.logging import RichHandler
 
     logging.basicConfig(
@@ -319,12 +309,14 @@ if __name__ == "__main__":
     #     for i in range(TASKS_PER_PRODUCER):
     #         task = f"Task-{i}"
     #         processor.put(task)
+    def consumer_func(batch: list[str]) -> None:
+        logger.debug("Processing batch: %s", batch)
 
-    processor = InchProcessor[str]()
-    for i in range(10):
+    processor = InchProcessor[str](consumer_func, batch_size=4)
+    for i in range(14):
         task = f"Task-{i}"
         processor.put(task)
 
-    consumer_func(processor)
+    processor.stop(wait_for_completion=True)
     # processor.stop(wait_for_completion=True)
     logger.debug("Main thread: Example run complete.")

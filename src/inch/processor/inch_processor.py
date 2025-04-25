@@ -20,6 +20,7 @@ class InchProcessor(Generic[TaskType]):
         target: Callable[[list[TaskType]], Any],
         batch_size: int = 1,
         max_worker: int = 1,
+        partial_batch_wait_time: float = 0.1,
     ) -> None:
         """
         Initialize an InchProcessor instance.
@@ -32,8 +33,15 @@ class InchProcessor(Generic[TaskType]):
             batch_size: The number of tasks to process in a batch. If None, tasks are processed
                        one at a time.
             max_worker: The number of worker threads to create. Default is 1.
+            partial_batch_wait_time: The time in seconds to wait for more tasks when a batch
+                                    is partially filled. Default is 0.1 seconds.
         """
-
+        if batch_size is not None and batch_size <= 0:
+            msg = "Batch size must be greater than 0"
+            raise ValueError(msg)
+        if max_worker <= 0:
+            msg = "Max worker must be greater than 0"
+            raise ValueError(msg)
         # Use the TaskType type variable to specify the type of elements in the queue
         self._task_queue: queue.Queue[TaskType] = queue.Queue()
         self._stop_event = threading.Event()
@@ -42,16 +50,19 @@ class InchProcessor(Generic[TaskType]):
         self._target = target
         self._consuming_count = 0
         self._consuming_lock = threading.Lock()
+        self._partial_batch_wait_time = partial_batch_wait_time
+        self.__stoped = False
         # Register signal handlers to gracefully stop on interruption
         self._setup_signal_handlers()
-
+        self.consumers = []
         for _ in range(self._max_worker):
             # Create a consumer thread for each worker
-            thread = threading.Thread(target=self.consume_wrapper, daemon=True)
+            thread = threading.Thread(target=self._consume_wrapper, daemon=True)
+            self.consumers.append(thread)
             thread.start()
 
-    def consume_wrapper(self) -> None:
-        while self.is_running():
+    def _consume_wrapper(self) -> None:
+        while not self._stop_event.is_set():
             batch = self._get(self._batch_size)
 
             if batch is not None:
@@ -108,6 +119,7 @@ class InchProcessor(Generic[TaskType]):
         # Specify the type of the batch list
         batch: list[TaskType] = []
         attempt = 0
+        start_time = time.monotonic()
 
         while len(batch) < batch_size and self.is_running():
             try:
@@ -115,11 +127,12 @@ class InchProcessor(Generic[TaskType]):
                     task: TaskType = self._task_queue.get(block=False)
                     batch.append(task)
                     self._consuming_count += 1
-                # Reset attempt counter after successful retrieval
+                # Reset attempt counter and start time after successful retrieval
                 attempt = 0
+                start_time = time.monotonic()
             except queue.Empty:  # noqa: PERF203
-                if batch:
-                    # If we have a partial batch, return it
+                if batch and time.monotonic() - start_time >= self._partial_batch_wait_time:
+                    # If we have a partial batch and waited _partial_batch_wait_time, return it
                     return batch
                 # Apply exponential backoff when queue is empty
                 backoff_time = self._calculate_backoff_time(attempt, max_backoff=1.0, base=2.0)
@@ -238,6 +251,10 @@ class InchProcessor(Generic[TaskType]):
                                            this is the maximum time (in seconds) to wait
                                            for the queue to drain and consumers to exit.
         """
+        self.wait_for_completion = wait_for_completion
+        if self.__stoped:
+            return
+        self.__stoped = True
 
         logger.debug("Prevented new task submissions.")
 
@@ -245,22 +262,27 @@ class InchProcessor(Generic[TaskType]):
             logger.debug("Waiting for existing tasks to complete...")
             start_wait = time.monotonic()
             while True:
-                qsize = self._task_queue.qsize()
+                if not self.wait_for_completion:
+                    logger.debug("Stop event set, exiting wait loop.")
+                    break
                 if not self.is_running():
                     logger.debug("Stop event set, exiting wait loop.")
                     break
+                qsize = self._task_queue.qsize()
                 if qsize == 0 and self._consuming_count == 0:
                     logger.debug("Queue is empty, all consumers have finished.")
                     break
                 if drain_timeout is not None and time.monotonic() - start_wait > drain_timeout:
                     logger.debug("Wait timeout (%d seconds), forcing exit.", drain_timeout)
                     break
+                time.sleep(0.1)  # Sleep briefly to avoid busy waiting
             logger.debug("Stop completed.")
         else:
             logger.debug("Stop requested, but not waiting for completion.")
         qsize = self.qsize()
-        if qsize > 0:
-            logger.warning("Processor stopped with %d tasks remaining in the queue.", qsize)
+        if qsize > 0 or self._consuming_count > 0:
+            logger.warning("Processor stopped with %d tasks remaining in the queue, and %d tasks consuming.", qsize, self._consuming_count)
+        logger.debug("Consumer thread stopped.")
 
     def qsize(self) -> int:
         """Returns the approximate number of tasks in the queue."""
@@ -300,33 +322,28 @@ if __name__ == "__main__":
 
     logging.basicConfig(
         level=logging.DEBUG,
+        format="%(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[RichHandler(rich_tracebacks=True, show_time=False)],
+        handlers=[RichHandler(rich_tracebacks=True)],
     )
     TIMEOUT = 5
-    NUM_CONSUMERS = 2
-    TASKS_PER_PRODUCER = 20
+    NUM_CONSUMERS = 1
+    TASKS_PER_PRODUCER = 23
+
+    def consume(batch: list[tuple[int, int]]) -> None:
+        logger.debug(f"Processing batch of {len(batch)} tasks...")
+        for task in batch:
+            time.sleep(0.5)
+            logger.debug(f"{task[0]} + {task[1]} = {task[0] + task[1]}")
 
     # When creating an InchProcessor instance, the type checker can usually infer the type,
     # but it's better to specify explicitly: InchProcessor[str]
-    # with InchProcessor[str]() as processor:
-    #     for _ in range(NUM_CONSUMERS):
-    #         # Pass typed processor and matching processing function
-    #         thread = threading.Thread(target=consumer_func, args=(processor,), daemon=True)
-    #         thread.start()
+    with InchProcessor(consume, max_worker=2, batch_size=4) as processor:
+        for i in range(TASKS_PER_PRODUCER):
+            task = (i, i * 2)
+            processor.put(task)
 
-    #     for i in range(TASKS_PER_PRODUCER):
-    #         task = f"Task-{i}"
-    #         processor.put(task)
-
-    def c(batch: list[str]) -> None:
-        logger.debug("Processing batch: %s", batch)
-
-    processor = InchProcessor[str](c, batch_size=4)
-    for i in range(15):
-        task = f"Task-{i}"
-        processor.put(task)
-
-    processor.stop(wait_for_completion=True)
+    # processor.stop(wait_for_completion=True)
     # processor.stop(wait_for_completion=True)
     logger.debug("Main thread: Example run complete.")
+    logger.info("All tasks have been processed successfully.")

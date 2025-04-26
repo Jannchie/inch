@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any, Generic, overload
 
 from inch.processor.logger import logger
-from inch.types import TaskType
+from inch.type import TaskType
 
 
 class InchProcessor(Generic[TaskType]):

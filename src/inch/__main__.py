@@ -20,6 +20,6 @@ if __name__ == "__main__":
     with InchPoolExecutor() as executor:
         for i in range(20):
             if i % 5 == 0:
-                executor.start_inch(func_task)
+                executor.submit(func_task)
             else:
-                executor.start_inch(TestTask(name=f"Task {i + 1}", total=1000))
+                executor.submit(TestTask(name=f"Task {i + 1}", total=1000))

@@ -78,7 +78,7 @@ class FuncInch(Inch):
         """
         Execute the wrapped function with the stored arguments.
         """
-        self.func(*self.args, **self.kwargs)
+        self.func(self)
 
 
 class InchPoolExecutor:
@@ -116,11 +116,11 @@ class InchPoolExecutor:
         self.__completed_task_count = 0  # Number of completed tasks
         self.__overall_task_id = None  # ID of the overall progress bar
         self.__finish_event = threading.Event()  # Event to signal completion
-        self.__shutdown_event = threading.Event()  # Added: Event to signal shutdown request
+        self.__shutdown_event = threading.Event()  # Event to signal shutdown request
         self.__lock = threading.Lock()  # Lock for thread-safety
         self.max_workers = max_workers  # Maximum number of worker threads
         self.name = name  # Name of the executor
-        self.__pool = None  # Added: Reference to the thread pool
+        self.__pool = None  # Reference to the thread pool
 
     def __enter__(self) -> "InchPoolExecutor":
         """
@@ -164,6 +164,9 @@ class InchPoolExecutor:
 
         Raises:
             TypeError: If task is neither an Inch nor a callable
+
+        Note:
+            If executor is shutting down, new tasks will be rejected and not added to queue.
         """
         # If shutdown has been requested, reject new tasks
         if self.__shutdown_event.is_set():
@@ -209,6 +212,7 @@ class InchPoolExecutor:
             wait: If True, wait for all submitted tasks to complete; if False, return immediately
             cancel_pending: If True, cancel all pending tasks that haven't started executing
         """
+        # Set the shutdown event to signal that no new tasks should be accepted
         self.__shutdown_event.set()
 
         # If cancellation of pending tasks is requested
@@ -242,7 +246,7 @@ class InchPoolExecutor:
             # Lock to avoid thread issues when operating on running_tasks
             with self.__lock:
                 for task_id, task in self.__running_tasks.items():
-                    self.__progress.update(task_id, completed=task.completed)
+                    self.__progress.update(task_id, completed=task.completed, total=task.total)
         self.__progress.stop()
 
     def __run_tasks(self) -> None:
@@ -250,6 +254,8 @@ class InchPoolExecutor:
         Main task execution loop.
 
         Takes tasks from the queue and submits them to the thread pool for execution.
+        Sets finish_event when all tasks are completed or when shutdown is requested
+        and no tasks are running.
         """
 
         def run_task(task: Inch) -> None:
@@ -258,6 +264,11 @@ class InchPoolExecutor:
 
             Args:
                 task: The Inch task to execute
+
+            Note:
+                Updates both task-specific and overall progress bars.
+                Handles exceptions raised during task execution.
+                Helps determine when all tasks are completed.
             """
             task_id = self.__progress.add_task(task.name, total=task.total)
             with self.__lock:

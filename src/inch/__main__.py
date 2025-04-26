@@ -11,10 +11,10 @@ if __name__ == "__main__":
                 self.completed += random.randint(1, 200)
                 sleep(0.1)
 
-    def func_task() -> None:
-        completed = 0
-        while completed < 1200:
-            completed += random.randint(1, 200)
+    def func_task(inch: Inch) -> None:
+        inch.total = 1200
+        while inch.completed < 1200:
+            inch.completed += random.randint(1, 200)
             sleep(0.1)
 
     with InchPoolExecutor() as executor:

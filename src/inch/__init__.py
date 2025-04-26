@@ -1,6 +1,8 @@
 import contextlib
 import logging
+import signal
 import threading
+import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -122,15 +124,42 @@ class InchPoolExecutor:
         self.name = name  # Name of the executor
         self.__pool = None  # Reference to the thread pool
 
+    def __handle_keyboard_interrupt(self, _signum: int | None = None, _frame: object | None = None) -> None:
+        """
+        Handle KeyboardInterrupt (Ctrl+C) by initiating an immediate shutdown.
+
+        This method is registered as a signal handler for SIGINT.
+        It cancels pending tasks and triggers a graceful shutdown process.
+
+        Args:
+            _signum: Signal number (provided by signal handler)
+            _frame: Current stack frame (provided by signal handler)
+        """
+        # Prevent multiple interrupt handlers from running simultaneously
+        if not self.__shutdown_event.is_set():
+            self.console.print("\n:warning: KeyboardInterrupt detected (Ctrl+C). Initiating immediate shutdown...")
+            # Cancel all pending tasks and don't wait for running tasks
+            self.shutdown(wait=False, cancel_pending=True)
+            # Signal the main loop to exit
+            self.__finish_event.set()
+            # Add a None to the queue to allow worker threads to exit
+            self.__pending_tasks.put(None)
+
     def __enter__(self) -> "InchPoolExecutor":
         """
         Enter the context manager.
 
         Initializes the progress bar and starts worker threads.
+        Sets up KeyboardInterrupt handling.
 
         Returns:
             Self, for use in a with statement
         """
+        # Save the original SIGINT handler to restore it later
+        self.__original_sigint_handler = signal.getsignal(signal.SIGINT)
+        # Register our custom handler for KeyboardInterrupt
+        signal.signal(signal.SIGINT, self.__handle_keyboard_interrupt)
+
         # Initialize the progress bar
         self.started_at = datetime.now(UTC)
         self.console.print(f":rocket: Start running [bold]{self.name}[/bold]...")
@@ -141,13 +170,26 @@ class InchPoolExecutor:
         self.progress_thread.start()
         return self
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
         """
         Exit the context manager.
 
         Waits for all tasks to complete and cleans up resources.
+        Restores the original SIGINT handler.
+
+        Args:
+            exc_type: Type of exception that caused the context to be exited, if any
+            exc_val: Exception instance that caused the context to be exited, if any
+            exc_tb: Traceback of exception that caused the context to be exited, if any
         """
-        self.__finish_event.wait()
+
+        while not self.__finish_event.wait(0.1):
+            if self.__shutdown_event.is_set():
+                break
+
+        # Restore the original SIGINT handler
+        signal.signal(signal.SIGINT, self.__original_sigint_handler)
+
         self.__main_thread.join()
         self.progress_thread.join()
         self.finished_at = datetime.now(UTC)
@@ -199,9 +241,20 @@ class InchPoolExecutor:
         Run the executor without using a context manager.
 
         Equivalent to using the executor in a with statement.
+        Sets up KeyboardInterrupt handling and ensures it's cleaned up.
         """
-        self.__enter__()
-        self.__exit__(None, None, None)
+        try:
+            self.__enter__()
+            # Set up a loop that can be interrupted by KeyboardInterrupt
+            while not self.__finish_event.is_set():
+                # Small sleep to avoid busy waiting
+                self.__finish_event.wait(0.1)
+        except KeyboardInterrupt:
+            # The KeyboardInterrupt will be caught here if not in __enter__
+            self.__handle_keyboard_interrupt()
+        finally:
+            # Make sure we always call __exit__ to clean up
+            self.__exit__(None, None, None)
 
     def shutdown(self, *, wait: bool = True, cancel_pending: bool = False) -> None:
         """
@@ -232,8 +285,6 @@ class InchPoolExecutor:
         # If waiting for task completion is requested
         if wait:
             self.__finish_event.wait()
-
-        self.console.print(":stop_sign: Executor shutdown initiated.")
 
     def __update_task_progress(self) -> None:
         """

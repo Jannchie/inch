@@ -183,9 +183,8 @@ class InchPoolExecutor:
             exc_tb: Traceback of exception that caused the context to be exited, if any
         """
 
-        while not self.__finish_event.wait(0.1):
-            if self.__shutdown_event.is_set():
-                break
+        while not self.__finish_event.wait(0.1) and not self.__shutdown_event.is_set():
+            ...
 
         # Restore the original SIGINT handler
         signal.signal(signal.SIGINT, self.__original_sigint_handler)

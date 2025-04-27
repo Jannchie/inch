@@ -137,7 +137,7 @@ class InchPoolExecutor:
         """
         # Prevent multiple interrupt handlers from running simultaneously
         if not self.__shutdown_event.is_set():
-            self.console.print("\n:warning: KeyboardInterrupt detected (Ctrl+C). Initiating immediate shutdown...")
+            self.console.print(":stop_sign: KeyboardInterrupt detected. Initiating immediate shutdown...")
             # Cancel all pending tasks and don't wait for running tasks
             self.shutdown(wait=False, cancel_pending=True)
             # Signal the main loop to exit
@@ -191,8 +191,11 @@ class InchPoolExecutor:
 
         self.__main_thread.join()
         self.progress_thread.join()
-        self.finished_at = datetime.now(UTC)
-        self.console.print(f":white_check_mark: Finished in {self.finished_at - self.started_at}")
+        if self.__shutdown_event.is_set():
+            self.console.print(":stop_sign: Executor has been shut down.")
+        else:
+            self.finished_at = datetime.now(UTC)
+            self.console.print(f":white_check_mark: Finished in {self.finished_at - self.started_at}")
 
     def submit(self, task: Inch | Callable, *args: tuple, **kwargs: dict) -> None:
         """
@@ -345,7 +348,6 @@ class InchPoolExecutor:
                 self.__pending_tasks.put(None)
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            self.__pool = pool  # Store thread pool reference for later operations
             while not self.__finish_event.is_set():
                 try:
                     task = self.__pending_tasks.get(timeout=0.1)  # Add timeout to allow checking finish_event

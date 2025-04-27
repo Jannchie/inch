@@ -130,14 +130,18 @@ class AsyncInchPoolExecutor:
             exc_val: Exception instance that caused the context to be exited, if any
             exc_tb: Traceback of exception that caused the context to be exited, if any
         """
-        # Wait for completion if no shutdown has been initiated
+        # Record if we had a clean shutdown (all tasks completed)
+        clean_finish = self.are_tasks_complete()
+
+        # Wait for completion if no shutdown has been explicitly requested
         if not self.__shutdown_event.is_set():
-            await self.shutdown(wait=True, cancel_pending=False)
+            await self.shutdown(wait=True, cancel_pending=False, silent=True)
 
         # Restore the original SIGINT handler
         signal.signal(signal.SIGINT, self.__original_sigint_handler)
 
-        if self.__shutdown_event.is_set():
+        # Only show "shut down" message if we had a forced shutdown, not natural completion
+        if self.__shutdown_event.is_set() and not clean_finish:
             self.console.print(":stop_sign: Executor has been shut down.")
         else:
             self.finished_at = datetime.now(UTC)
@@ -182,6 +186,43 @@ class AsyncInchPoolExecutor:
 
         # Start processing tasks if they're not already running
         self.__process_pending_tasks()
+
+    async def wait(self, timeout: float | None = None) -> bool:
+        """
+        Wait for all submitted tasks to complete.
+
+        This method provides a clean, public interface to wait for task completion
+        without accessing internal implementation details.
+
+        Args:
+            timeout: Maximum time to wait in seconds, or None to wait indefinitely
+
+        Returns:
+            True if all tasks completed, False if timeout occurred before completion
+        """
+        if self.__total_task_count == 0:
+            return True
+
+        if self.__completed_task_count >= self.__total_task_count:
+            return True
+
+        # Wait for the finish event which is set when all tasks complete
+        try:
+            if timeout is not None:
+                return await asyncio.wait_for(self.__finish_event.wait(), timeout)
+            await self.__finish_event.wait()
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    def are_tasks_complete(self) -> bool:
+        """
+        Check if all submitted tasks have completed.
+
+        Returns:
+            True if all tasks have completed, False otherwise
+        """
+        return self.__total_task_count > 0 and self.__completed_task_count >= self.__total_task_count
 
     def __initialize_overall_progress(self) -> None:
         """
@@ -286,7 +327,7 @@ class AsyncInchPoolExecutor:
             # Handle KeyboardInterrupt if not caught elsewhere
             await self.shutdown(wait=False, cancel_pending=True)
 
-    async def shutdown(self, *, wait: bool = True, cancel_pending: bool = False) -> None:
+    async def shutdown(self, *, wait: bool = True, cancel_pending: bool = False, silent: bool = False) -> None:
         """
         Gracefully shut down the executor, stopping acceptance of new tasks and optionally
         cancelling waiting tasks.
@@ -294,6 +335,7 @@ class AsyncInchPoolExecutor:
         Args:
             wait: If True, wait for all submitted tasks to complete; if False, return immediately
             cancel_pending: If True, cancel all pending tasks that haven't started executing
+            silent: If True, suppresses logging messages during shutdown
         """
         # Signal that no new tasks should be accepted
         self.__shutdown_event.set()
@@ -312,5 +354,6 @@ class AsyncInchPoolExecutor:
             # Wait for all tasks to complete
             remaining_tasks = len(self.__running_tasks) + len(self.__pending_tasks)
             if remaining_tasks > 0:
-                self.console.print(f"Waiting for {remaining_tasks} tasks to complete...")
+                if not silent:
+                    self.console.print(f"Waiting for {remaining_tasks} tasks to complete...")
                 await self.__finish_event.wait()

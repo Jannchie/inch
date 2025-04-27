@@ -82,11 +82,7 @@ async def main() -> None:
                 # Submit class-based tasks
                 executor.submit(AsyncTestTask(name=f"Async Task {i + 1}", total=1000))
 
-        # Important: Wait for all tasks to complete before exiting the context manager
-        # This prevents premature shutdown
-        await asyncio.sleep(0.5)  # Small delay to ensure all tasks are started
-        while executor._AsyncInchPoolExecutor__completed_task_count < executor._AsyncInchPoolExecutor__total_task_count:
-            await asyncio.sleep(0.1)
+        await executor.wait()
 
 
 if __name__ == "__main__":

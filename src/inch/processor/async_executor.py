@@ -89,7 +89,7 @@ class AsyncInchPoolExecutor:
         if not self.__shutdown_event.is_set():
             self.console.print(":stop_sign: KeyboardInterrupt detected. Initiating immediate shutdown...")
             # We need to schedule the shutdown in the event loop
-            asyncio.create_task(self.shutdown(wait=False, cancel_pending=True))
+            asyncio.create_task(self.shutdown(wait=False, cancel_pending=True))  # noqa: RUF006
 
     async def __aenter__(self) -> "AsyncInchPoolExecutor":
         """
@@ -211,9 +211,10 @@ class AsyncInchPoolExecutor:
             if timeout is not None:
                 return await asyncio.wait_for(self.__finish_event.wait(), timeout)
             await self.__finish_event.wait()
-            return True
         except asyncio.TimeoutError:
             return False
+        else:
+            return True
 
     def are_tasks_complete(self) -> bool:
         """
@@ -272,7 +273,7 @@ class AsyncInchPoolExecutor:
                 await task()
             except Exception as e:
                 self.console.print(f"Task {task.name} failed: {e}")
-                logger.exception(f"Error occurred while processing task {task.name}")
+                logger.exception("Error occurred while processing task %s", task.name)
             finally:
                 # Update the progress bar to completion
                 if task.total is not None:

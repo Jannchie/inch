@@ -1,17 +1,39 @@
 [project]
 name = "inch"
 version = "0.2.0"
-description = "Add your description here"
+description = "A Python library for managing and executing long-running tasks in batches with visual progress tracking"
 authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["rich>=13.9.2"]
+license = { text = "MIT" }
+keywords = [
+    "progress",
+    "concurrency",
+    "multithreading",
+    "batch-processing",
+    "cli",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Utilities",
+]
 
+[project.urls]
+Homepage = "https://github.com/jannchie/inch"
+Documentation = "https://github.com/jannchie/inch#readme"
+"Bug Tracker" = "https://github.com/jannchie/inch/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
 
 [tool.ruff]
 select = ["ALL"]

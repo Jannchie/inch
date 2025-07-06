@@ -5,9 +5,7 @@ description = "A Python library for managing and executing long-running tasks in
 authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "rich>=14.0.0",
-]
+dependencies = ["rich>=14.0.0"]
 license = { text = "MIT" }
 keywords = [
     "progress",
@@ -71,6 +69,3 @@ dev = [
     "pytest-cov>=6.2.1",
     "ruff>=0.12.2",
 ]
-
-[tool.pytest.ini_options]
-addopts = "--cov=src --cov-report=term-missing"

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from rich import print
 
-from inch.queue.memory_queue import MemoryQueue
+from inch.queue.memory_queue import AsyncMemoryQueue
 
 
 @dataclass
@@ -11,7 +11,7 @@ class Data:
     id: uuid.UUID
 
 
-queue = MemoryQueue[Data]()
+queue = AsyncMemoryQueue[Data]()
 
 
 async def main():
@@ -22,6 +22,7 @@ async def main():
         print(message)
         await queue.ack(message)
     print(await queue.get_status())
+
 
 if __name__ == "__main__":
     import asyncio

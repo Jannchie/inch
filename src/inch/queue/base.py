@@ -31,9 +31,10 @@ class QueueStatus:
     dead_letter_count: int
 
 
-class BaseQueue(ABC, Generic[T]):
-    def __init__(self, max_retries: int = 3) -> None:
+class AsyncBaseQueue(ABC, Generic[T]):
+    def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
         self.max_retries = max_retries
+        self.max_size = max_size
 
     @abstractmethod
     async def enqueue(self, data: T) -> None: ...
@@ -58,3 +59,33 @@ class BaseQueue(ABC, Generic[T]):
 
     @abstractmethod
     async def clear(self) -> None: ...
+
+
+class SyncBaseQueue(ABC, Generic[T]):
+    def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
+        self.max_retries = max_retries
+        self.max_size = max_size
+
+    @abstractmethod
+    def enqueue(self, data: T) -> None: ...
+
+    @abstractmethod
+    def dequeue(self, visibility_timeout: int = 60) -> Message[T] | None: ...
+
+    @abstractmethod
+    def extend_visibility(self, message_id: str, new_timeout: int) -> bool: ...
+
+    @abstractmethod
+    def ack(self, message: Message[T]) -> None: ...
+
+    @abstractmethod
+    def nack(self, message: Message[T], error: str | None = None) -> None: ...
+
+    @abstractmethod
+    def get_status(self) -> QueueStatus: ...
+
+    @abstractmethod
+    def get_dead_letter_messages(self) -> list[Message[T]]: ...
+
+    @abstractmethod
+    def clear(self) -> None: ...

@@ -1,14 +1,16 @@
 import asyncio
+import threading
+import time
 
 import pytest
 
 from inch.queue.base import Message, MessageStatus
-from inch.queue.memory_queue import MemoryQueue
+from inch.queue.memory_queue import AsyncMemoryQueue, SyncMemoryQueue
 
 
 @pytest.fixture
 def queue():
-    return MemoryQueue(max_retries=1)  # Set max_retries to 1 for easier dead-letter testing
+    return AsyncMemoryQueue(max_retries=1)  # Set max_retries to 1 for easier dead-letter testing
 
 
 @pytest.mark.asyncio
@@ -192,3 +194,120 @@ async def test_ack_non_existent_message(queue):
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.success_count == 0
+
+
+# Queue capacity limit tests
+@pytest.mark.asyncio
+async def test_async_queue_capacity_limit_blocking():
+    queue = AsyncMemoryQueue(max_size=2)
+    
+    # Fill the queue to capacity
+    await queue.enqueue("task1")
+    await queue.enqueue("task2")
+    
+    # Queue should be full now
+    assert queue._is_full()
+    
+    # Try to enqueue another item - this should not block in the test
+    # We'll use asyncio.wait_for to simulate a timeout
+    start_time = time.time()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(queue.enqueue("task3"), timeout=0.1)
+    elapsed = time.time() - start_time
+    assert elapsed >= 0.1  # Should have waited at least the timeout duration
+
+
+@pytest.mark.asyncio
+async def test_async_queue_capacity_limit_with_ack():
+    queue = AsyncMemoryQueue(max_size=2)
+    
+    # Fill the queue to capacity
+    await queue.enqueue("task1")
+    await queue.enqueue("task2")
+    
+    # Dequeue and ack one message
+    message = await queue.dequeue()
+    await queue.ack(message)
+    
+    # Now we should be able to enqueue another item
+    await queue.enqueue("task3")
+    
+    status = await queue.get_status()
+    assert status.pending_count == 2  # task2 and task3
+
+
+def test_sync_queue_capacity_limit_blocking():
+    queue = SyncMemoryQueue(max_size=2)
+    
+    # Fill the queue to capacity
+    queue.enqueue("task1")
+    queue.enqueue("task2")
+    
+    # Queue should be full now
+    assert queue._is_full()
+    
+    # Test blocking behavior using threading
+    enqueue_completed = threading.Event()
+    enqueue_started = threading.Event()
+    
+    def enqueue_task():
+        enqueue_started.set()
+        queue.enqueue("task3")  # This should block
+        enqueue_completed.set()
+    
+    # Start enqueue in another thread
+    thread = threading.Thread(target=enqueue_task)
+    thread.start()
+    
+    # Wait for the enqueue to start
+    enqueue_started.wait(timeout=1.0)
+    
+    # Give it a short time to try to enqueue (should be blocked)
+    time.sleep(0.1)
+    assert not enqueue_completed.is_set()  # Should still be blocked
+    
+    # Dequeue and ack one message to make space
+    message = queue.dequeue()
+    queue.ack(message)
+    
+    # Now the enqueue should complete
+    enqueue_completed.wait(timeout=1.0)
+    assert enqueue_completed.is_set()
+    
+    thread.join()
+    
+    status = queue.get_status()
+    assert status.pending_count == 2  # task2 and task3
+
+
+def test_sync_queue_capacity_limit_with_nack():
+    queue = SyncMemoryQueue(max_size=2, max_retries=1)
+    
+    # Fill the queue to capacity
+    queue.enqueue("task1")
+    queue.enqueue("task2")
+    
+    # Dequeue and nack a message (should go to dead letter)
+    message = queue.dequeue()
+    queue.nack(message)
+    queue.nack(message)  # Second nack should send to dead letter
+    
+    # Now we should be able to enqueue another item
+    queue.enqueue("task3")
+    
+    status = queue.get_status()
+    assert status.pending_count == 2  # task2 and task3
+    assert status.dead_letter_count == 1  # task1
+
+
+def test_queue_unlimited_capacity():
+    # Test that None max_size means unlimited
+    queue = SyncMemoryQueue(max_size=None)
+    
+    # Should be able to enqueue many items
+    for i in range(1000):
+        queue.enqueue(f"task{i}")
+    
+    status = queue.get_status()
+    assert status.pending_count == 1000
+    assert not queue._is_full()

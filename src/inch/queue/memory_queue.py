@@ -1,30 +1,50 @@
 import asyncio
+import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from logging import getLogger
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
-from .base import BaseQueue, Message, MessageStatus, QueueStatus
+from .base import AsyncBaseQueue, Message, MessageStatus, QueueStatus, SyncBaseQueue
 
 T = TypeVar("T")
 
 
-class MemoryQueue(BaseQueue[T], Generic[T]):
-    def __init__(self, max_retries: int = 3) -> None:
-        super().__init__(max_retries)
+@dataclass
+class InFlightMessage(Generic[T]):
+    """Represents a message that is currently being processed."""
+
+    message_object: Message[T]
+    expiration_time: float
+
+
+class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
+    def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
+        super().__init__(max_retries, max_size)
         self._pending_queue: deque[Message[T]] = deque()
-        # Stores {'message_object': Message[T], 'expiration_time': float}
-        self._in_flight_messages: dict[str, dict[str, Any]] = {}
+        self._in_flight_messages: dict[str, InFlightMessage[T]] = {}
         self._success_messages: list[Message[T]] = []
         self._dead_letter_messages: list[Message[T]] = []
         self._lock = asyncio.Lock()
+        self._not_full = asyncio.Condition(self._lock)
         self.logger = getLogger("inch.queue")
 
     async def enqueue(self, data: T) -> None:
-        async with self._lock:
+        async with self._not_full:
+            # Wait until queue is not full
+            while self._is_full():
+                await self._not_full.wait()
+
             message = Message(data)
             message.status = MessageStatus.PENDING
             self._pending_queue.append(message)
+
+    def _is_full(self) -> bool:
+        if self.max_size is None:
+            return False
+        current_size = len(self._pending_queue) + len(self._in_flight_messages)
+        return current_size >= self.max_size
 
     async def dequeue(self, visibility_timeout: int = 60) -> Message[T] | None:
         async with self._lock:
@@ -38,18 +58,21 @@ class MemoryQueue(BaseQueue[T], Generic[T]):
             message = self._pending_queue.popleft()
             message.status = MessageStatus.PROCESSING
 
-            if message.message_id is not None:
-                expiration_time = time.time() + visibility_timeout
-                self._in_flight_messages[message.message_id] = {
-                    "message_object": message,
-                    "expiration_time": expiration_time,
-                }
+            if message.message_id is None:
+                self.logger.error("Message has None message_id, this should not happen")
+                return None
+
+            expiration_time = time.time() + visibility_timeout
+            self._in_flight_messages[message.message_id] = InFlightMessage(
+                message_object=message,
+                expiration_time=expiration_time,
+            )
             return message
 
     async def extend_visibility(self, message_id: str, new_timeout: int) -> bool:
         async with self._lock:
             if message_id in self._in_flight_messages:
-                self._in_flight_messages[message_id]["expiration_time"] = time.time() + new_timeout
+                self._in_flight_messages[message_id].expiration_time = time.time() + new_timeout
                 return True
             return False
 
@@ -61,13 +84,13 @@ class MemoryQueue(BaseQueue[T], Generic[T]):
         now = time.time()
         timed_out_ids: list[str] = []
 
-        for message_id, data in self._in_flight_messages.items():
-            if now >= data["expiration_time"]:
+        for message_id, in_flight_msg in self._in_flight_messages.items():
+            if now >= in_flight_msg.expiration_time:
                 timed_out_ids.append(message_id)
 
         for message_id in timed_out_ids:
-            data = self._in_flight_messages.pop(message_id)
-            message = data["message_object"]
+            in_flight_msg = self._in_flight_messages.pop(message_id)
+            message = in_flight_msg.message_object
 
             message.retry_count += 1
             if message.retry_count >= self.max_retries:
@@ -76,20 +99,24 @@ class MemoryQueue(BaseQueue[T], Generic[T]):
             else:
                 message.status = MessageStatus.PENDING
                 self._pending_queue.appendleft(message)  # Re-queue to the front
-            # print(f"Message {message_id} timed out and was re-queued or moved to dead letter.") # For debugging
 
     async def ack(self, message: Message[T]) -> None:
-        async with self._lock:
-            if message.message_id not in self._in_flight_messages:
-                # Optionally log a warning if message_id is not found
-                self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
+        async with self._not_full:
+            if message.message_id is None:
+                self.logger.warning("Cannot ack message with None message_id")
+                return
+
             if message.message_id in self._in_flight_messages:
                 del self._in_flight_messages[message.message_id]
                 message.status = MessageStatus.SUCCESS
                 self._success_messages.append(message)
+                # Notify waiting tasks that queue has space
+                self._not_full.notify()
+            else:
+                self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
 
     async def nack(self, message: Message[T], error: str | None = None) -> None:
-        async with self._lock:
+        async with self._not_full:
             if message.message_id is None or message.message_id not in self._in_flight_messages:
                 return
 
@@ -100,9 +127,11 @@ class MemoryQueue(BaseQueue[T], Generic[T]):
             if message.retry_count >= self.max_retries:
                 message.status = MessageStatus.DEAD_LETTER
                 self._dead_letter_messages.append(message)
+                # Notify waiting tasks that queue has space
+                self._not_full.notify()
             else:
                 message.status = MessageStatus.PENDING
-                self._pending_queue.append(message)
+                self._pending_queue.appendleft(message)
 
     async def get_status(self) -> QueueStatus:
         async with self._lock:
@@ -120,6 +149,142 @@ class MemoryQueue(BaseQueue[T], Generic[T]):
 
     async def clear(self) -> None:
         async with self._lock:
+            self._pending_queue.clear()
+            self._in_flight_messages.clear()
+            self._success_messages.clear()
+            self._dead_letter_messages.clear()
+
+
+class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
+    def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
+        super().__init__(max_retries, max_size)
+        self._pending_queue: deque[Message[T]] = deque()
+        self._in_flight_messages: dict[str, InFlightMessage[T]] = {}
+        self._success_messages: list[Message[T]] = []
+        self._dead_letter_messages: list[Message[T]] = []
+        self._lock = threading.Lock()
+        self._not_full = threading.Condition(self._lock)
+        self.logger = getLogger("inch.queue")
+
+    def enqueue(self, data: T) -> None:
+        with self._not_full:
+            # Wait until queue is not full
+            while self._is_full():
+                self._not_full.wait()
+
+            message = Message(data)
+            message.status = MessageStatus.PENDING
+            self._pending_queue.append(message)
+
+    def _is_full(self) -> bool:
+        if self.max_size is None:
+            return False
+        current_size = len(self._pending_queue) + len(self._in_flight_messages)
+        return current_size >= self.max_size
+
+    def dequeue(self, visibility_timeout: int = 60) -> Message[T] | None:
+        with self._lock:
+            # 1. Check for timed-out messages and re-queue them
+            self._check_timeouts()
+
+            # 2. Get a new message from the pending queue
+            if not self._pending_queue:
+                return None
+
+            message = self._pending_queue.popleft()
+            message.status = MessageStatus.PROCESSING
+
+            if message.message_id is None:
+                self.logger.error("Message has None message_id, this should not happen")
+                return None
+
+            expiration_time = time.time() + visibility_timeout
+            self._in_flight_messages[message.message_id] = InFlightMessage(
+                message_object=message,
+                expiration_time=expiration_time,
+            )
+            return message
+
+    def extend_visibility(self, message_id: str, new_timeout: int) -> bool:
+        with self._lock:
+            if message_id in self._in_flight_messages:
+                self._in_flight_messages[message_id].expiration_time = time.time() + new_timeout
+                return True
+            return False
+
+    def _check_timeouts(self) -> None:
+        """
+        (Must be called within a lock)
+        Checks all in-flight messages and re-queues those that have timed out.
+        """
+        now = time.time()
+        timed_out_ids: list[str] = []
+
+        for message_id, in_flight_msg in self._in_flight_messages.items():
+            if now >= in_flight_msg.expiration_time:
+                timed_out_ids.append(message_id)
+
+        for message_id in timed_out_ids:
+            in_flight_msg = self._in_flight_messages.pop(message_id)
+            message = in_flight_msg.message_object
+
+            message.retry_count += 1
+            if message.retry_count >= self.max_retries:
+                message.status = MessageStatus.DEAD_LETTER
+                self._dead_letter_messages.append(message)
+            else:
+                message.status = MessageStatus.PENDING
+                self._pending_queue.appendleft(message)  # Re-queue to the front
+
+    def ack(self, message: Message[T]) -> None:
+        with self._not_full:
+            if message.message_id is None:
+                self.logger.warning("Cannot ack message with None message_id")
+                return
+
+            if message.message_id in self._in_flight_messages:
+                del self._in_flight_messages[message.message_id]
+                message.status = MessageStatus.SUCCESS
+                self._success_messages.append(message)
+                # Notify waiting threads that queue has space
+                self._not_full.notify()
+            else:
+                self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
+
+    def nack(self, message: Message[T], error: str | None = None) -> None:
+        with self._not_full:
+            if message.message_id is None or message.message_id not in self._in_flight_messages:
+                return
+
+            del self._in_flight_messages[message.message_id]
+            message.error_message = error
+            message.retry_count += 1
+
+            if message.retry_count >= self.max_retries:
+                message.status = MessageStatus.DEAD_LETTER
+                self._dead_letter_messages.append(message)
+                # Notify waiting threads that queue has space
+                self._not_full.notify()
+            else:
+                message.status = MessageStatus.PENDING
+                self._pending_queue.appendleft(message)
+
+    def get_status(self) -> QueueStatus:
+        with self._lock:
+            self._check_timeouts()
+            return QueueStatus(
+                pending_count=len(self._pending_queue),
+                processing_count=len(self._in_flight_messages),
+                success_count=len(self._success_messages),
+                dead_letter_count=len(self._dead_letter_messages),
+            )
+
+    def get_dead_letter_messages(self) -> list[Message[T]]:
+        with self._lock:
+            return self._dead_letter_messages.copy()
+
+    def clear(self) -> None:
+        with self._lock:
             self._pending_queue.clear()
             self._in_flight_messages.clear()
             self._success_messages.clear()

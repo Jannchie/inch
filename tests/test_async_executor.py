@@ -120,7 +120,7 @@ async def test_async_executor_submit_with_args_kwargs():
         return f"{prefix}_{item.data}_{suffix}"
     
     item = TestItem(1, "test")
-    result = await executor.submit(process_with_args, item, "start", suffix="finish")
+    result = await executor.submit(process_with_args, item, "start", suffix="finish") # type: ignore
     
     assert result == "start_test_finish"
     executor.shutdown()

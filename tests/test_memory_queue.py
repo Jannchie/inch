@@ -227,6 +227,7 @@ async def test_async_queue_capacity_limit_with_ack():
     
     # Dequeue and ack one message
     message = await queue.dequeue()
+    assert message is not None
     await queue.ack(message)
     
     # Now we should be able to enqueue another item
@@ -268,6 +269,7 @@ def test_sync_queue_capacity_limit_blocking():
     
     # Dequeue and ack one message to make space
     message = queue.dequeue()
+    assert message is not None
     queue.ack(message)
     
     # Now the enqueue should complete
@@ -289,6 +291,7 @@ def test_sync_queue_capacity_limit_with_nack():
     
     # Dequeue and nack a message (should go to dead letter)
     message = queue.dequeue()
+    assert message is not None
     queue.nack(message)
     queue.nack(message)  # Second nack should send to dead letter
     
@@ -311,3 +314,234 @@ def test_queue_unlimited_capacity():
     status = queue.get_status()
     assert status.pending_count == 1000
     assert not queue._is_full()
+
+
+# Priority tests
+@pytest.mark.asyncio
+async def test_async_priority_queue():
+    queue = AsyncMemoryQueue()
+    
+    # Enqueue messages with different priorities
+    await queue.enqueue("low", priority=1)
+    await queue.enqueue("high", priority=10)
+    await queue.enqueue("medium", priority=5)
+    await queue.enqueue("highest", priority=15)
+    
+    # Dequeue should return highest priority first
+    message1 = await queue.dequeue()
+    assert message1 is not None
+    assert message1.data == "highest"
+    assert message1.priority == 15
+    
+    message2 = await queue.dequeue()
+    assert message2 is not None
+    assert message2.data == "high"
+    assert message2.priority == 10
+    
+    message3 = await queue.dequeue()
+    assert message3 is not None
+    assert message3.data == "medium"
+    assert message3.priority == 5
+    
+    message4 = await queue.dequeue()
+    assert message4 is not None
+    assert message4.data == "low"
+    assert message4.priority == 1
+
+
+def test_sync_priority_queue():
+    queue = SyncMemoryQueue()
+    
+    # Enqueue messages with different priorities
+    queue.enqueue("low", priority=1)
+    queue.enqueue("high", priority=10)
+    queue.enqueue("medium", priority=5)
+    queue.enqueue("highest", priority=15)
+    
+    # Dequeue should return highest priority first
+    message1 = queue.dequeue()
+    assert message1 is not None
+    assert message1.data == "highest"
+    assert message1.priority == 15
+    
+    message2 = queue.dequeue()
+    assert message2 is not None
+    assert message2.data == "high"
+    assert message2.priority == 10
+    
+    message3 = queue.dequeue()
+    assert message3 is not None
+    assert message3.data == "medium"
+    assert message3.priority == 5
+    
+    message4 = queue.dequeue()
+    assert message4 is not None
+    assert message4.data == "low"
+    assert message4.priority == 1
+
+
+# Batch operation tests
+@pytest.mark.asyncio
+async def test_async_enqueue_batch():
+    queue = AsyncMemoryQueue()
+    
+    # Enqueue batch of items with priorities
+    items = [("task1", 5), ("task2", 10), ("task3", 1)]
+    await queue.enqueue_batch(items)
+    
+    status = await queue.get_status()
+    assert status.pending_count == 3
+    
+    # Should dequeue in priority order
+    message1 = await queue.dequeue()
+    assert message1 is not None
+    assert message1.data == "task2"  # priority 10
+    
+    message2 = await queue.dequeue()
+    assert message2 is not None
+    assert message2.data == "task1"  # priority 5
+    
+    message3 = await queue.dequeue()
+    assert message3 is not None
+    assert message3.data == "task3"  # priority 1
+
+
+@pytest.mark.asyncio
+async def test_async_dequeue_batch():
+    queue = AsyncMemoryQueue()
+    
+    # Enqueue multiple messages
+    for i in range(5):
+        await queue.enqueue(f"task{i}", priority=i)
+    
+    # Dequeue batch
+    messages = await queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Should be in priority order (highest first)
+    assert messages[0].data == "task4"  # priority 4
+    assert messages[1].data == "task3"  # priority 3
+    assert messages[2].data == "task2"  # priority 2
+    
+    status = await queue.get_status()
+    assert status.pending_count == 2
+    assert status.processing_count == 3
+
+
+@pytest.mark.asyncio
+async def test_async_ack_batch():
+    queue = AsyncMemoryQueue()
+    
+    # Enqueue and dequeue multiple messages
+    for i in range(3):
+        await queue.enqueue(f"task{i}")
+    
+    messages = await queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Ack all messages at once
+    await queue.ack_batch(messages)
+    
+    status = await queue.get_status()
+    assert status.processing_count == 0
+    assert status.success_count == 3
+
+
+@pytest.mark.asyncio
+async def test_async_nack_batch():
+    queue = AsyncMemoryQueue(max_retries=1)
+    
+    # Enqueue and dequeue multiple messages
+    for i in range(3):
+        await queue.enqueue(f"task{i}")
+    
+    messages = await queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Nack all messages at once
+    await queue.nack_batch(messages, error="batch error")
+    
+    status = await queue.get_status()
+    assert status.processing_count == 0
+    assert status.dead_letter_count == 3  # All should go to dead letter with max_retries=1
+
+
+def test_sync_enqueue_batch():
+    queue = SyncMemoryQueue()
+    
+    # Enqueue batch of items with priorities
+    items = [("task1", 5), ("task2", 10), ("task3", 1)]
+    queue.enqueue_batch(items)
+    
+    status = queue.get_status()
+    assert status.pending_count == 3
+    
+    # Should dequeue in priority order
+    message1 = queue.dequeue()
+    assert message1 is not None
+    assert message1.data == "task2"  # priority 10
+    
+    message2 = queue.dequeue()
+    assert message2 is not None
+    assert message2.data == "task1"  # priority 5
+    
+    message3 = queue.dequeue()
+    assert message3 is not None
+    assert message3.data == "task3"  # priority 1
+
+
+def test_sync_dequeue_batch():
+    queue = SyncMemoryQueue()
+    
+    # Enqueue multiple messages
+    for i in range(5):
+        queue.enqueue(f"task{i}", priority=i)
+    
+    # Dequeue batch
+    messages = queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Should be in priority order (highest first)
+    assert messages[0].data == "task4"  # priority 4
+    assert messages[1].data == "task3"  # priority 3
+    assert messages[2].data == "task2"  # priority 2
+    
+    status = queue.get_status()
+    assert status.pending_count == 2
+    assert status.processing_count == 3
+
+
+def test_sync_ack_batch():
+    queue = SyncMemoryQueue()
+    
+    # Enqueue and dequeue multiple messages
+    for i in range(3):
+        queue.enqueue(f"task{i}")
+    
+    messages = queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Ack all messages at once
+    queue.ack_batch(messages)
+    
+    status = queue.get_status()
+    assert status.processing_count == 0
+    assert status.success_count == 3
+
+
+def test_sync_nack_batch():
+    queue = SyncMemoryQueue(max_retries=1)
+    
+    # Enqueue and dequeue multiple messages
+    for i in range(3):
+        queue.enqueue(f"task{i}")
+    
+    messages = queue.dequeue_batch(limit=3)
+    assert len(messages) == 3
+    
+    # Nack all messages at once
+    queue.nack_batch(messages, error="batch error")
+    
+    status = queue.get_status()
+    assert status.processing_count == 0
+    assert status.dead_letter_count == 3  # All should go to dead letter with max_retries=1

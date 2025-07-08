@@ -88,7 +88,7 @@ def test_sync_executor_submit_with_args_kwargs():
         return f"{prefix}_{item.data}_{suffix}"
     
     item = TestItem(1, "test")
-    result = executor.submit(process_with_args, item, "start", suffix="finish")
+    result = executor.submit(process_with_args, item, "start", suffix="finish") # type: ignore
     
     assert result == "start_test_finish"
     executor.shutdown()

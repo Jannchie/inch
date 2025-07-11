@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import inspect
 import logging
 import threading
@@ -140,11 +141,15 @@ class AsyncInchPoolExecutor(Generic[T, R]):
         while not self._shutdown:
             try:
                 # Get message from queue using the main event loop
-                future = asyncio.run_coroutine_threadsafe(
-                    self._queue.dequeue(visibility_timeout=60),
-                    self._loop,
-                )
-                message = future.result(timeout=1.0)
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._queue.dequeue(visibility_timeout=60),
+                        self._loop,
+                    )
+                    message = future.result(timeout=1.0)
+                except RuntimeError:
+                    # Event loop is closed, stop worker
+                    break
 
                 if message is None:
                     continue
@@ -152,7 +157,8 @@ class AsyncInchPoolExecutor(Generic[T, R]):
                 task = message.data
 
                 if task.future.cancelled():
-                    asyncio.run_coroutine_threadsafe(self._queue.ack(message), self._loop)
+                    with contextlib.suppress(RuntimeError):
+                        asyncio.run_coroutine_threadsafe(self._queue.ack(message), self._loop)
                     continue
 
                 # Execute task directly in worker thread
@@ -167,7 +173,8 @@ class AsyncInchPoolExecutor(Generic[T, R]):
                         result = task.fn(task.data, *task.args, **task.kwargs)
 
                     task.future.set_result(result)
-                    asyncio.run_coroutine_threadsafe(self._queue.ack(message), self._loop)
+                    with contextlib.suppress(RuntimeError):
+                        asyncio.run_coroutine_threadsafe(self._queue.ack(message), self._loop)
 
                     # Update progress
                     with self._lock:
@@ -177,7 +184,8 @@ class AsyncInchPoolExecutor(Generic[T, R]):
 
                 except Exception as e:
                     task.future.set_exception(e)
-                    asyncio.run_coroutine_threadsafe(self._queue.nack(message, str(e)), self._loop)
+                    with contextlib.suppress(RuntimeError):
+                        asyncio.run_coroutine_threadsafe(self._queue.nack(message, str(e)), self._loop)
 
                     # Update failed count
                     with self._lock:
@@ -227,4 +235,3 @@ class AsyncInchPoolExecutor(Generic[T, R]):
                 self._failed_count,
                 self._submitted_count,
             )
-

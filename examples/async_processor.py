@@ -21,7 +21,7 @@ class WorkItem:
 
 async def main():
     """Main function demonstrating AsyncInchPoolProcessor usage"""
-    from inch.processor import AsyncInchPoolProcessor
+    from inch.aio.processor import AsyncInchPoolProcessor
 
     print("🚀 AsyncInchPoolProcessor Example")
     print("=" * 50)
@@ -120,7 +120,7 @@ async def main():
     print("\n📦 Example 4: Custom Queue with Size Limit")
     print("-" * 40)
 
-    from inch.queue.memory_queue import AsyncMemoryQueue
+    from inch.aio.queue.memory_queue import AsyncMemoryQueue
 
     # Create a custom queue with a size limit
     custom_queue = AsyncMemoryQueue[WorkItem](max_size=5)

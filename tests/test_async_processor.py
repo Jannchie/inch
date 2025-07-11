@@ -5,8 +5,8 @@ from typing import Any
 
 import pytest
 
-from inch.processor.async_processor import AsyncInchPoolProcessor
-from inch.queue.memory_queue import AsyncMemoryQueue
+from inch.aio.processor.async_processor import AsyncInchPoolProcessor
+from inch.aio.queue.memory_queue import AsyncMemoryQueue
 
 
 @dataclass

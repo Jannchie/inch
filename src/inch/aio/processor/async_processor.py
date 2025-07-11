@@ -7,8 +7,8 @@ from typing import Generic, TypeVar
 
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
-from inch.queue.base import AsyncBaseQueue
-from inch.queue.memory_queue import AsyncMemoryQueue
+from inch.aio.queue.base import AsyncBaseQueue
+from inch.aio.queue.memory_queue import AsyncMemoryQueue
 
 T = TypeVar("T")
 

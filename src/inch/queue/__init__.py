@@ -1,4 +1,4 @@
-from .base import AsyncBaseQueue, Message, MessageStatus, SyncBaseQueue
-from .memory_queue import AsyncMemoryQueue, SyncMemoryQueue
+from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
+from .memory_queue import SyncMemoryQueue
 
-__all__ = ["AsyncBaseQueue", "AsyncMemoryQueue", "Message", "MessageStatus", "SyncBaseQueue", "SyncMemoryQueue"]
+__all__ = ["Message", "MessageStatus", "QueueStatus", "SyncBaseQueue", "SyncMemoryQueue"]

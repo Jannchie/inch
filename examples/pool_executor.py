@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from rich import print
 
-from inch.executor import AsyncInchPoolExecutor
+from inch.aio.executor import AsyncInchPoolExecutor
 
 
 @dataclass

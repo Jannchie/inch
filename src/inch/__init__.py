@@ -1,11 +1,13 @@
-from inch.executor import AsyncInchPoolExecutor, SyncInchPoolExecutor
+from inch.aio import AsyncBaseQueue, AsyncInchPoolExecutor, AsyncInchPoolProcessor, AsyncMemoryQueue
+from inch.executor import SyncInchPoolExecutor
 from inch.processor import SyncInchPoolProcessor, Task
-from inch.queue.base import AsyncBaseQueue, SyncBaseQueue
-from inch.queue.memory_queue import AsyncMemoryQueue, SyncMemoryQueue
+from inch.queue.base import SyncBaseQueue
+from inch.queue.memory_queue import SyncMemoryQueue
 
 __all__ = [
     "AsyncBaseQueue",
     "AsyncInchPoolExecutor",
+    "AsyncInchPoolProcessor",
     "AsyncMemoryQueue",
     "SyncBaseQueue",
     "SyncInchPoolExecutor",

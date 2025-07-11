@@ -1,11 +1,12 @@
+import asyncio
 import heapq
-import threading
 import time
 from dataclasses import dataclass
 from logging import getLogger
 from typing import Generic, TypeVar
 
-from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
+from inch.aio.queue import AsyncBaseQueue
+from inch.queue import Message, MessageStatus, QueueStatus
 
 T = TypeVar("T")
 
@@ -18,7 +19,7 @@ class InFlightMessage(Generic[T]):
     expiration_time: float
 
 
-class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
+class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
     def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
         super().__init__(max_retries, max_size)
         self._pending_queue: list[tuple[int, int, Message[T]]] = []
@@ -26,27 +27,27 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
         self._in_flight_messages: dict[str, InFlightMessage[T]] = {}
         self._success_messages: list[Message[T]] = []
         self._dead_letter_messages: list[Message[T]] = []
-        self._lock = threading.Lock()
-        self._not_full = threading.Condition(self._lock)
+        self._lock = asyncio.Lock()
+        self._not_full = asyncio.Condition(self._lock)
         self.logger = getLogger("inch.queue")
 
-    def enqueue(self, data: T, priority: int = 0) -> None:
-        with self._not_full:
+    async def enqueue(self, data: T, priority: int = 0) -> None:
+        async with self._not_full:
             # Wait until queue is not full
             while self._is_full():
-                self._not_full.wait()
+                await self._not_full.wait()
 
             message = Message(data, priority=priority)
             message.status = MessageStatus.PENDING
             heapq.heappush(self._pending_queue, (-priority, self._counter, message))
             self._counter += 1
 
-    def enqueue_batch(self, items: list[tuple[T, int]]) -> None:
-        with self._not_full:
+    async def enqueue_batch(self, items: list[tuple[T, int]]) -> None:
+        async with self._not_full:
             for data, priority in items:
                 # Wait until queue is not full
                 while self._is_full():
-                    self._not_full.wait()
+                    await self._not_full.wait()
 
                 message = Message(data, priority=priority)
                 message.status = MessageStatus.PENDING
@@ -59,8 +60,8 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
         current_size = len(self._pending_queue) + len(self._in_flight_messages)
         return current_size >= self.max_size
 
-    def dequeue(self, visibility_timeout: int = 60) -> Message[T] | None:
-        with self._lock:
+    async def dequeue(self, visibility_timeout: int = 60) -> Message[T] | None:
+        async with self._lock:
             # 1. Check for timed-out messages and re-queue them
             self._check_timeouts()
 
@@ -82,8 +83,8 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
             )
             return message
 
-    def dequeue_batch(self, limit: int = 10, visibility_timeout: int = 60) -> list[Message[T]]:
-        with self._lock:
+    async def dequeue_batch(self, limit: int = 10, visibility_timeout: int = 60) -> list[Message[T]]:
+        async with self._lock:
             # 1. Check for timed-out messages and re-queue them
             self._check_timeouts()
 
@@ -109,8 +110,8 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
 
             return messages
 
-    def extend_visibility(self, message_id: str, new_timeout: int) -> bool:
-        with self._lock:
+    async def extend_visibility(self, message_id: str, new_timeout: int) -> bool:
+        async with self._lock:
             if message_id in self._in_flight_messages:
                 self._in_flight_messages[message_id].expiration_time = time.time() + new_timeout
                 return True
@@ -141,8 +142,8 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                 heapq.heappush(self._pending_queue, (-message.priority, self._counter, message))
                 self._counter += 1
 
-    def ack(self, message: Message[T]) -> None:
-        with self._not_full:
+    async def ack(self, message: Message[T]) -> None:
+        async with self._not_full:
             if message.message_id is None:
                 self.logger.warning("Cannot ack message with None message_id")
                 return
@@ -151,13 +152,13 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                 del self._in_flight_messages[message.message_id]
                 message.status = MessageStatus.SUCCESS
                 self._success_messages.append(message)
-                # Notify waiting threads that queue has space
+                # Notify waiting tasks that queue has space
                 self._not_full.notify()
             else:
                 self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
 
-    def ack_batch(self, messages: list[Message[T]]) -> None:
-        with self._not_full:
+    async def ack_batch(self, messages: list[Message[T]]) -> None:
+        async with self._not_full:
             for message in messages:
                 if message.message_id is None:
                     self.logger.warning("Cannot ack message with None message_id")
@@ -169,11 +170,11 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                     self._success_messages.append(message)
                 else:
                     self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
-            # Notify waiting threads that queue has space
+            # Notify waiting tasks that queue has space
             self._not_full.notify_all()
 
-    def nack(self, message: Message[T], error: str | None = None) -> None:
-        with self._not_full:
+    async def nack(self, message: Message[T], error: str | None = None) -> None:
+        async with self._not_full:
             if message.message_id is None or message.message_id not in self._in_flight_messages:
                 return
 
@@ -184,15 +185,15 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
             if message.retry_count >= self.max_retries:
                 message.status = MessageStatus.DEAD_LETTER
                 self._dead_letter_messages.append(message)
-                # Notify waiting threads that queue has space
+                # Notify waiting tasks that queue has space
                 self._not_full.notify()
             else:
                 message.status = MessageStatus.PENDING
                 heapq.heappush(self._pending_queue, (-message.priority, self._counter, message))
                 self._counter += 1
 
-    def nack_batch(self, messages: list[Message[T]], error: str | None = None) -> None:
-        with self._not_full:
+    async def nack_batch(self, messages: list[Message[T]], error: str | None = None) -> None:
+        async with self._not_full:
             for message in messages:
                 if message.message_id is None or message.message_id not in self._in_flight_messages:
                     continue
@@ -208,11 +209,11 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                     message.status = MessageStatus.PENDING
                     heapq.heappush(self._pending_queue, (-message.priority, self._counter, message))
                     self._counter += 1
-            # Notify waiting threads that queue has space
+            # Notify waiting tasks that queue has space
             self._not_full.notify_all()
 
-    def get_status(self) -> QueueStatus:
-        with self._lock:
+    async def get_status(self) -> QueueStatus:
+        async with self._lock:
             self._check_timeouts()
             return QueueStatus(
                 pending_count=len(self._pending_queue),
@@ -221,12 +222,12 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                 dead_letter_count=len(self._dead_letter_messages),
             )
 
-    def get_dead_letter_messages(self) -> list[Message[T]]:
-        with self._lock:
+    async def get_dead_letter_messages(self) -> list[Message[T]]:
+        async with self._lock:
             return self._dead_letter_messages.copy()
 
-    def clear(self) -> None:
-        with self._lock:
+    async def clear(self) -> None:
+        async with self._lock:
             self._pending_queue.clear()
             self._in_flight_messages.clear()
             self._success_messages.clear()

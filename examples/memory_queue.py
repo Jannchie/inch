@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from rich import print
 
-from inch.queue.memory_queue import AsyncMemoryQueue
+from inch.aio.queue.memory_queue import AsyncMemoryQueue
 
 
 @dataclass

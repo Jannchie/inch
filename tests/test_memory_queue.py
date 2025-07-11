@@ -5,7 +5,8 @@ import time
 import pytest
 
 from inch.queue.base import Message, MessageStatus
-from inch.queue.memory_queue import AsyncMemoryQueue, SyncMemoryQueue
+from inch.queue.memory_queue import SyncMemoryQueue
+from inch.aio.queue.memory_queue import AsyncMemoryQueue
 
 
 @pytest.fixture

@@ -77,7 +77,13 @@ class AsyncInchPoolExecutor(Generic[T, R]):
 
         # Wait for result using asyncio
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, future.result)
+        try:
+            return await loop.run_in_executor(None, future.result)
+        except Exception:
+            # Update failed count when exception occurs
+            with self._lock:
+                self._failed_count += 1
+            raise
 
     async def map(
         self,
@@ -186,10 +192,6 @@ class AsyncInchPoolExecutor(Generic[T, R]):
                     task.future.set_exception(e)
                     with contextlib.suppress(RuntimeError):
                         asyncio.run_coroutine_threadsafe(self._queue.nack(message, str(e)), self._loop)
-
-                    # Update failed count
-                    with self._lock:
-                        self._failed_count += 1
 
                     logger.exception("Task processing failed")
 

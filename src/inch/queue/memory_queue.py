@@ -1,21 +1,12 @@
 import heapq
 import threading
 import time
-from dataclasses import dataclass
 from logging import getLogger
-from typing import Generic, TypeVar
+from typing import Generic
+
+from inch.types import InFlightMessage, T
 
 from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
-
-T = TypeVar("T")
-
-
-@dataclass
-class InFlightMessage(Generic[T]):
-    """Represents a message that is currently being processed."""
-
-    message_object: Message[T]
-    expiration_time: float
 
 
 class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):

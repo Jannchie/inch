@@ -1,10 +1,9 @@
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Generic
 
-T = TypeVar("T")
-R = TypeVar("R")
+from inch.types import R, T
 
 
 @dataclass

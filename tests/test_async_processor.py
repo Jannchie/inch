@@ -1,19 +1,12 @@
 import asyncio
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
 from inch.aio.processor.async_processor import AsyncInchPoolProcessor
 from inch.aio.queue.memory_queue import AsyncMemoryQueue
-
-
-@dataclass
-class TestItem:
-    id: int
-    data: str
-    processed: bool = False
+from tests.utils import TestItem
 
 
 @pytest.fixture

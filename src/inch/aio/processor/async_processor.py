@@ -3,14 +3,13 @@ import logging
 import threading
 import types
 from collections.abc import Awaitable, Callable
-from typing import Generic, TypeVar
+from typing import Generic
 
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 from inch.aio.queue.base import AsyncBaseQueue
 from inch.aio.queue.memory_queue import AsyncMemoryQueue
-
-T = TypeVar("T")
+from inch.types import T
 
 
 class AsyncInchPoolProcessor(Generic[T]):

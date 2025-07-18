@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from typing import Generic
 
 # Import shared types from the main queue module
 from inch.queue.base import Message, QueueStatus
-
-T = TypeVar("T")
+from inch.types import T
 
 
 class AsyncBaseQueue(ABC, Generic[T]):

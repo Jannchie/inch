@@ -1,22 +1,12 @@
 import asyncio
 import heapq
 import time
-from dataclasses import dataclass
 from logging import getLogger
-from typing import Generic, TypeVar
+from typing import Generic
 
 from inch.aio.queue import AsyncBaseQueue
 from inch.queue import Message, MessageStatus, QueueStatus
-
-T = TypeVar("T")
-
-
-@dataclass
-class InFlightMessage(Generic[T]):
-    """Represents a message that is currently being processed."""
-
-    message_object: Message[T]
-    expiration_time: float
+from inch.types import InFlightMessage, T
 
 
 class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):

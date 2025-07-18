@@ -3,14 +3,13 @@ import threading
 import time
 import types
 from collections.abc import Callable
-from typing import Generic, TypeVar
+from typing import Generic
 
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 from inch.queue.base import SyncBaseQueue
 from inch.queue.memory_queue import SyncMemoryQueue
-
-T = TypeVar("T")
+from inch.types import T
 
 
 class SyncInchPoolProcessor(Generic[T]):

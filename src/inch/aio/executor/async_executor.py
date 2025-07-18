@@ -6,16 +6,14 @@ import threading
 import types
 from collections.abc import Awaitable, Callable, Iterable
 from concurrent.futures import Future
-from typing import Generic, TypeVar
+from typing import Generic
 
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TaskID, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 
 from inch.aio.queue.base import AsyncBaseQueue
 from inch.aio.queue.memory_queue import AsyncMemoryQueue
 from inch.processor.task import Task
-
-T = TypeVar("T")
-R = TypeVar("R")
+from inch.types import R, T
 
 logger = logging.getLogger(__name__)
 

@@ -1,20 +1,13 @@
 import time
 import threading
 from concurrent.futures import Future
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
 from inch.executor.sync_executor import InchPoolExecutor
 from inch.queue.memory_queue import SyncMemoryQueue
-
-
-@dataclass
-class TestItem:
-    id: int
-    data: str
-    processed: bool = False
+from tests.utils import TestItem
 
 
 @pytest.fixture

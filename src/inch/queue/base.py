@@ -22,6 +22,7 @@ class Message(Generic[T]):
     retry_count: int = field(default=0)
     error_message: str | None = field(default=None)
     priority: int = field(default=0)
+    key: str | None = field(default=None)
 
 
 @dataclass

@@ -5,7 +5,12 @@ description = "A Python library for managing and executing long-running tasks in
 authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["rich>=14.0.0"]
+dependencies = [
+    "rich>=14.0.0",
+    "redis>=6.2.0",
+    "sqlalchemy>=2.0.41",
+    "aiosqlite>=0.21.0",
+]
 license = { text = "MIT" }
 keywords = [
     "progress",

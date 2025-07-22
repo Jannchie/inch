@@ -186,7 +186,7 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
         Checks all in-flight messages and re-queues those that have timed out.
         """
         now = time.time()
-        timed_out_ids: list[str] = []
+        timed_out_ids: list[uuid.UUID] = []
 
         for message_id, in_flight_msg in self._in_flight_messages.items():
             if now >= in_flight_msg.expiration_time:

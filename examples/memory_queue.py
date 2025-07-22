@@ -20,7 +20,7 @@ async def main():
         await queue.enqueue(datum)
     while message := await queue.dequeue():
         print(message)
-        await queue.ack(message)
+        await queue.ack(message_id=message.message_id)
     print(await queue.get_status())
 
 

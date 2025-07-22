@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -26,7 +27,7 @@ async def test_enqueue_dequeue_ack(queue):
     assert status.pending_count == 0
     assert status.processing_count == 1
 
-    await queue.ack(message)
+    await queue.ack(message.message_id)
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.success_count == 1
@@ -39,7 +40,7 @@ async def test_enqueue_dequeue_nack(queue):
     assert message is not None
     assert message.data == "task2"
 
-    await queue.nack(message, error="failed")
+    await queue.nack(message.message_id, error="failed")
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.pending_count == 0  # Should be 0 because max_retries is 1
@@ -68,7 +69,7 @@ async def test_message_timeout_requeue(queue):
     assert status.pending_count == 0
     assert status.dead_letter_count == 1
 
-    await queue.ack(message)
+    await queue.ack(message.message_id)
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.success_count == 0
@@ -131,7 +132,7 @@ async def test_extend_visibility(queue):
     assert requeued_message.data == "task5"
     assert requeued_message.retry_count == 1
 
-    await queue.ack(requeued_message)
+    await queue.ack(requeued_message.message_id)
 
 
 @pytest.mark.asyncio
@@ -139,7 +140,7 @@ async def test_clear_queue(queue):
     await queue.enqueue("task_clear_1")
     await queue.enqueue("task_clear_2")
     msg = await queue.dequeue(visibility_timeout=1)
-    await queue.nack(msg)
+    await queue.nack(msg.message_id)
     await queue.enqueue("task_clear_3")
 
     status = await queue.get_status()
@@ -166,8 +167,8 @@ async def test_dequeue_empty_queue(queue):
 
 @pytest.mark.asyncio
 async def test_nack_non_existent_message(queue):
-    message = Message(data="non_existent", message_id="fake_id")
-    await queue.nack(message, error="test")
+    message = Message(data="non_existent", message_id=uuid.uuid4())
+    await queue.nack(message.message_id, error="test")
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.dead_letter_count == 0
@@ -178,11 +179,11 @@ async def test_nack_retry(queue):
     queue.max_retries = 2
     await queue.enqueue("test")
     message = await queue.dequeue()
-    await queue.nack(message, error="test")
+    await queue.nack(message.message_id, error="test")
     status = await queue.get_status()
     status.pending_count = 1
     await queue.dequeue()
-    await queue.nack(message, error="test")
+    await queue.nack(message.message_id, error="test")
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.dead_letter_count == 1
@@ -190,8 +191,8 @@ async def test_nack_retry(queue):
 
 @pytest.mark.asyncio
 async def test_ack_non_existent_message(queue):
-    message = Message(data="non_existent", message_id="fake_id")
-    await queue.ack(message)
+    message = Message(data="non_existent", message_id=uuid.uuid4())
+    await queue.ack(message.message_id)
     status = await queue.get_status()
     assert status.processing_count == 0
     assert status.success_count == 0
@@ -229,7 +230,7 @@ async def test_async_queue_capacity_limit_with_ack():
     # Dequeue and ack one message
     message = await queue.dequeue()
     assert message is not None
-    await queue.ack(message)
+    await queue.ack(message.message_id)
     
     # Now we should be able to enqueue another item
     await queue.enqueue("task3")
@@ -271,7 +272,7 @@ def test_sync_queue_capacity_limit_blocking():
     # Dequeue and ack one message to make space
     message = queue.dequeue()
     assert message is not None
-    queue.ack(message)
+    queue.ack(message.message_id)
     
     # Now the enqueue should complete
     enqueue_completed.wait(timeout=1.0)
@@ -293,8 +294,8 @@ def test_sync_queue_capacity_limit_with_nack():
     # Dequeue and nack a message (should go to dead letter)
     message = queue.dequeue()
     assert message is not None
-    queue.nack(message)
-    queue.nack(message)  # Second nack should send to dead letter
+    queue.nack(message.message_id)
+    queue.nack(message.message_id)  # Second nack should send to dead letter
     
     # Now we should be able to enqueue another item
     queue.enqueue("task3")
@@ -442,7 +443,7 @@ async def test_async_ack_batch():
     assert len(messages) == 3
     
     # Ack all messages at once
-    await queue.ack_batch(messages)
+    await queue.ack_batch([msg.message_id for msg in messages])
     
     status = await queue.get_status()
     assert status.processing_count == 0
@@ -461,7 +462,7 @@ async def test_async_nack_batch():
     assert len(messages) == 3
     
     # Nack all messages at once
-    await queue.nack_batch(messages, error="batch error")
+    await queue.nack_batch([msg.message_id for msg in messages], error="batch error")
     
     status = await queue.get_status()
     assert status.processing_count == 0
@@ -525,7 +526,7 @@ def test_sync_ack_batch():
     assert len(messages) == 3
     
     # Ack all messages at once
-    queue.ack_batch(messages)
+    queue.ack_batch([msg.message_id for msg in messages])
     
     status = queue.get_status()
     assert status.processing_count == 0
@@ -543,7 +544,7 @@ def test_sync_nack_batch():
     assert len(messages) == 3
     
     # Nack all messages at once
-    queue.nack_batch(messages, error="batch error")
+    queue.nack_batch([msg.message_id for msg in messages], error="batch error")
     
     status = queue.get_status()
     assert status.processing_count == 0
@@ -705,7 +706,7 @@ def test_sync_get_status_by_prefix():
     # Dequeue a user task and check status again
     msg = queue.dequeue(key="user:123")
     assert msg is not None
-    queue.ack(msg)
+    queue.ack(msg.message_id)
     
     user_status = queue.get_status(key_prefix="user:")
     assert user_status.pending_count == 1
@@ -759,7 +760,7 @@ def test_sync_key_message_timeout_and_requeue():
     assert requeued_message.key == "user:123"
     assert requeued_message.retry_count == 1
     
-    queue.ack(requeued_message)
+    queue.ack(requeued_message.message_id)
 
 
 def test_sync_key_nack_and_requeue():
@@ -773,7 +774,7 @@ def test_sync_key_nack_and_requeue():
     assert message is not None
     assert message.key == "user:123"
     
-    queue.nack(message, error="processing failed")
+    queue.nack(message.message_id, error="processing failed")
     
     # Should be requeued to the same key queue
     requeued_message = queue.dequeue(key="user:123")
@@ -783,7 +784,7 @@ def test_sync_key_nack_and_requeue():
     assert requeued_message.retry_count == 1
     assert requeued_message.error_message == "processing failed"
     
-    queue.ack(requeued_message)
+    queue.ack(requeued_message.message_id)
 
 
 def test_sync_key_dead_letter_with_prefix_status():
@@ -797,13 +798,13 @@ def test_sync_key_dead_letter_with_prefix_status():
     # Process and nack user tasks (should go to dead letter)
     user_msg1 = queue.dequeue(key="user:123")
     assert user_msg1 is not None
-    queue.nack(user_msg1)
-    queue.nack(user_msg1)  # Second nack sends to dead letter
+    queue.nack(user_msg1.message_id)
+    queue.nack(user_msg1.message_id)  # Second nack sends to dead letter
     
     user_msg2 = queue.dequeue(key="user:456") 
     assert user_msg2 is not None
-    queue.nack(user_msg2)
-    queue.nack(user_msg2)  # Second nack sends to dead letter
+    queue.nack(user_msg2.message_id)
+    queue.nack(user_msg2.message_id)  # Second nack sends to dead letter
     
     # Check prefix-based status
     user_status = queue.get_status(key_prefix="user:")
@@ -852,7 +853,7 @@ def test_sync_key_extend_visibility():
     assert requeued_message.key == "user:123"
     assert requeued_message.retry_count == 1
     
-    queue.ack(requeued_message)
+    queue.ack(requeued_message.message_id)
 
 
 def test_sync_empty_key_queue_operations():
@@ -914,7 +915,7 @@ def test_sync_key_queue_capacity_limit():
     # Dequeue and ack one message to make space
     message = queue.dequeue(key="user:123")
     assert message is not None
-    queue.ack(message)
+    queue.ack(message.message_id)
     
     # Now the enqueue should complete
     enqueue_completed.wait(timeout=1.0)
@@ -1088,7 +1089,7 @@ async def test_async_get_status_by_prefix():
     # Dequeue a user task and check status again
     msg = await queue.dequeue(key="user:123")
     assert msg is not None
-    await queue.ack(msg)
+    await queue.ack(msg.message_id)
     
     user_status = await queue.get_status(key_prefix="user:")
     assert user_status.pending_count == 1
@@ -1144,4 +1145,4 @@ async def test_async_key_message_timeout_and_requeue():
     assert requeued_message.key == "user:123"
     assert requeued_message.retry_count == 1
     
-    await queue.ack(requeued_message)
+    await queue.ack(requeued_message.message_id)

@@ -74,7 +74,7 @@ class SyncInchPoolProcessor(Generic[T]):
                     self._process_func(message.data)
 
                     # Acknowledge successful processing
-                    self._queue.ack(message)
+                    self._queue.ack(message.message_id)
 
                     # Update progress
                     with self._lock:
@@ -84,7 +84,7 @@ class SyncInchPoolProcessor(Generic[T]):
 
                 except Exception as e:
                     # Handle processing error
-                    self._queue.nack(message, str(e))
+                    self._queue.nack(message.message_id, str(e))
 
                     with self._lock:
                         self._failed_count += 1

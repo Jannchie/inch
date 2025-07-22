@@ -1,6 +1,7 @@
 import asyncio
 import heapq
 import time
+import uuid
 from logging import getLogger
 from typing import Generic
 
@@ -13,7 +14,7 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
     def __init__(self, max_retries: int = 3, max_size: int | None = None) -> None:
         super().__init__(max_retries, max_size)
         self._counter = 0
-        self._in_flight_messages: dict[str, InFlightMessage[T]] = {}
+        self._in_flight_messages: dict[uuid.UUID, InFlightMessage[T]] = {}
         self._success_messages: list[Message[T]] = []
         self._dead_letter_messages: list[Message[T]] = []
         self._lock = asyncio.Lock()
@@ -63,7 +64,9 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
         current_size = total_pending + len(self._in_flight_messages)
         return current_size >= self.max_size
 
-    async def dequeue(self, visibility_timeout: int = 60, key: str | None = None, key_prefix: str | None = None) -> Message[T] | None:  # noqa: C901, PLR0912
+    async def dequeue(  # noqa: C901, PLR0912
+        self, visibility_timeout: float = 60, key: str | None = None, key_prefix: str | None = None,
+    ) -> Message[T] | None:
         async with self._lock:
             # 1. Check for timed-out messages and re-queue them
             self._check_timeouts()
@@ -113,7 +116,9 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
             )
             return message
 
-    async def dequeue_batch(self, limit: int = 10, visibility_timeout: int = 60, key: str | None = None, key_prefix: str | None = None) -> list[Message[T]]:
+    async def dequeue_batch(
+        self, limit: int = 10, visibility_timeout: float = 60, key: str | None = None, key_prefix: str | None = None,
+    ) -> list[Message[T]]:
         async with self._lock:
             # 1. Check for timed-out messages and re-queue them
             self._check_timeouts()
@@ -154,7 +159,7 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
 
             return messages
 
-    def _process_dequeued_message(self, message: Message[T], visibility_timeout: int, messages: list[Message[T]]) -> None:
+    def _process_dequeued_message(self, message: Message[T], visibility_timeout: float, messages: list[Message[T]]) -> None:
         message.status = MessageStatus.PROCESSING
 
         if message.message_id is None:
@@ -168,7 +173,7 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
         )
         messages.append(message)
 
-    async def extend_visibility(self, message_id: str, new_timeout: int) -> bool:
+    async def extend_visibility(self, message_id: uuid.UUID, new_timeout: float) -> bool:
         async with self._lock:
             if message_id in self._in_flight_messages:
                 self._in_flight_messages[message_id].expiration_time = time.time() + new_timeout
@@ -203,43 +208,39 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
                 heapq.heappush(self._key_queues[message.key], (-message.priority, self._counter, message))
                 self._counter += 1
 
-    async def ack(self, message: Message[T]) -> None:
+    async def ack(self, message_id: uuid.UUID) -> None:
         async with self._not_full:
-            if message.message_id is None:
-                self.logger.warning("Cannot ack message with None message_id")
-                return
-
-            if message.message_id in self._in_flight_messages:
-                del self._in_flight_messages[message.message_id]
+            if message_id in self._in_flight_messages:
+                in_flight_msg = self._in_flight_messages.pop(message_id)
+                message = in_flight_msg.message_object
                 message.status = MessageStatus.SUCCESS
                 self._success_messages.append(message)
                 # Notify waiting tasks that queue has space
                 self._not_full.notify()
             else:
-                self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
+                self.logger.warning("Message ID %s not found in in-flight messages during ack.", message_id)
 
-    async def ack_batch(self, messages: list[Message[T]]) -> None:
+    async def ack_batch(self, message_ids: list[uuid.UUID]) -> None:
         async with self._not_full:
-            for message in messages:
-                if message.message_id is None:
-                    self.logger.warning("Cannot ack message with None message_id")
-                    continue
-
-                if message.message_id in self._in_flight_messages:
-                    del self._in_flight_messages[message.message_id]
+            for message_id in message_ids:
+                if message_id in self._in_flight_messages:
+                    in_flight_msg = self._in_flight_messages.pop(message_id)
+                    message = in_flight_msg.message_object
                     message.status = MessageStatus.SUCCESS
                     self._success_messages.append(message)
                 else:
-                    self.logger.warning("Message ID %s not found in in-flight messages during ack.", message.message_id)
+                    self.logger.warning("Message ID %s not found in in-flight messages during ack.", message_id)
             # Notify waiting tasks that queue has space
             self._not_full.notify_all()
 
-    async def nack(self, message: Message[T], error: str | None = None) -> None:
+    async def nack(self, message_id: uuid.UUID, error: str | None = None) -> None:
         async with self._not_full:
-            if message.message_id is None or message.message_id not in self._in_flight_messages:
+            if message_id not in self._in_flight_messages:
+                self.logger.warning("Message ID %s not found in in-flight messages during nack.", message_id)
                 return
 
-            del self._in_flight_messages[message.message_id]
+            in_flight_msg = self._in_flight_messages.pop(message_id)
+            message = in_flight_msg.message_object
             message.error_message = error
             message.retry_count += 1
 
@@ -256,13 +257,15 @@ class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):
                 heapq.heappush(self._key_queues[message.key], (-message.priority, self._counter, message))
                 self._counter += 1
 
-    async def nack_batch(self, messages: list[Message[T]], error: str | None = None) -> None:
+    async def nack_batch(self, message_ids: list[uuid.UUID], error: str | None = None) -> None:
         async with self._not_full:
-            for message in messages:
-                if message.message_id is None or message.message_id not in self._in_flight_messages:
+            for message_id in message_ids:
+                if message_id not in self._in_flight_messages:
+                    self.logger.warning("Message ID %s not found in in-flight messages during nack.", message_id)
                     continue
 
-                del self._in_flight_messages[message.message_id]
+                in_flight_msg = self._in_flight_messages.pop(message_id)
+                message = in_flight_msg.message_object
                 message.error_message = error
                 message.retry_count += 1
 

@@ -77,7 +77,7 @@ class AsyncInchPoolProcessor(Generic[T]):
                         self._process_func(message.data)
 
                     # Acknowledge successful processing
-                    await self._queue.ack(message)
+                    await self._queue.ack(message.message_id)
 
                     # Update progress
                     with self._lock:
@@ -87,7 +87,7 @@ class AsyncInchPoolProcessor(Generic[T]):
 
                 except Exception as e:
                     # Handle processing error
-                    await self._queue.nack(message, str(e))
+                    await self._queue.nack(message.message_id, str(e))
 
                     with self._lock:
                         self._failed_count += 1

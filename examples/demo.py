@@ -38,7 +38,7 @@ async def main():
     user_task = await queue.dequeue(key="user:123")
     if user_task:
         print(f"Got user task: {user_task.data.content}")
-        await queue.ack(user_task)
+        await queue.ack(user_task.message_id)
 
     # Get tasks by key prefix
     print("\n=== Getting tasks by key prefix ===")
@@ -47,7 +47,7 @@ async def main():
         print(f"Got {len(admin_tasks)} admin tasks:")
         for task in admin_tasks:
             print(f"  - {task.data.content} (key: {task.key})")
-        await queue.ack_batch(admin_tasks)
+        await queue.ack_batch([task.message_id for task in admin_tasks])
 
     # Get general tasks (no key specified)
     print("\n=== Getting general tasks ===")
@@ -56,7 +56,7 @@ async def main():
         print(f"Got {len(general_tasks)} general tasks:")
         for task in general_tasks:
             print(f"  - {task.data.content} (key: {task.key})")
-        await queue.ack_batch(general_tasks)
+        await queue.ack_batch([task.message_id for task in general_tasks])
 
     print("\n=== Queue status by prefix ===")
     user_status = await queue.get_status(key_prefix="user:")
@@ -71,7 +71,7 @@ async def main():
         print(f"Processing {len(remaining_tasks)} remaining tasks:")
         for task in remaining_tasks:
             print(f"  - {task.data.content} (key: {task.key})")
-        await queue.ack_batch(remaining_tasks)
+        await queue.ack_batch([task.message_id for task in remaining_tasks])
 
     print("\nFinal queue status:")
     print(await queue.get_status())

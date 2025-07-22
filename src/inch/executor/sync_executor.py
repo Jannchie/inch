@@ -116,7 +116,7 @@ class InchPoolExecutor(Generic[T, R]):
             if message is None:
                 break
             message.data.future.cancel()
-            self._queue.ack(message)
+            self._queue.ack(message.message_id)
 
     def _start_workers(self) -> None:
         for i in range(self._max_workers):
@@ -140,7 +140,7 @@ class InchPoolExecutor(Generic[T, R]):
                 task = message.data
 
                 if task.future.cancelled():
-                    self._queue.ack(message)
+                    self._queue.ack(message.message_id)
                     continue
 
                 # Execute task
@@ -150,7 +150,7 @@ class InchPoolExecutor(Generic[T, R]):
 
                     result = task.fn(task.data, *task.args, **task.kwargs)
                     task.future.set_result(result)
-                    self._queue.ack(message)
+                    self._queue.ack(message.message_id)
 
                     # Update progress
                     with self._lock:
@@ -160,7 +160,7 @@ class InchPoolExecutor(Generic[T, R]):
 
                 except Exception as e:
                     task.future.set_exception(e)
-                    self._queue.nack(message, str(e))
+                    self._queue.nack(message.message_id, str(e))
 
                     # Update failed count
                     with self._lock:

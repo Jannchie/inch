@@ -25,13 +25,10 @@ async def main():
     await queue.enqueue(Data(id=uuid.uuid4(), content="User task 2"), priority=1, key="user:789")
     await queue.enqueue(Data(id=uuid.uuid4(), content="General task"), priority=3)
 
-    # Add batch with keys
-    batch_items = [
-        (Data(id=uuid.uuid4(), content="Batch user task 1"), 1, "user:batch"),
-        (Data(id=uuid.uuid4(), content="Batch admin task 1"), 2, "admin:batch"),
-        (Data(id=uuid.uuid4(), content="Batch general task"), 3, None),
-    ]
-    await queue.enqueue_batch_with_keys(batch_items)
+    # Add batches with different keys and priorities
+    await queue.enqueue_batch([Data(id=uuid.uuid4(), content="Batch user task 1")], priority=1, key="user:batch")
+    await queue.enqueue_batch([Data(id=uuid.uuid4(), content="Batch admin task 1")], priority=2, key="admin:batch")
+    await queue.enqueue_batch([Data(id=uuid.uuid4(), content="Batch general task")], priority=3, key=None)
 
     print("Queue status after adding tasks:")
     print(await queue.get_status())

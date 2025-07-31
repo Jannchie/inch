@@ -386,9 +386,10 @@ def test_sync_priority_queue():
 async def test_async_enqueue_batch():
     queue = AsyncMemoryQueue()
     
-    # Enqueue batch of items with priorities
-    items = [("task1", 5), ("task2", 10), ("task3", 1)]
-    await queue.enqueue_batch(items)
+    # Enqueue batch of items with different priorities
+    await queue.enqueue_batch(["task1"], priority=5)
+    await queue.enqueue_batch(["task2"], priority=10)
+    await queue.enqueue_batch(["task3"], priority=1)
     
     status = await queue.get_status()
     assert status.pending_count == 3
@@ -470,9 +471,10 @@ async def test_async_nack_batch():
 def test_sync_enqueue_batch():
     queue = SyncMemoryQueue()
     
-    # Enqueue batch of items with priorities
-    items = [("task1", 5), ("task2", 10), ("task3", 1)]
-    queue.enqueue_batch(items)
+    # Enqueue batch of items with different priorities
+    queue.enqueue_batch(["task1"], priority=5)
+    queue.enqueue_batch(["task2"], priority=10)
+    queue.enqueue_batch(["task3"], priority=1)
     
     status = queue.get_status()
     assert status.pending_count == 3
@@ -650,16 +652,13 @@ def test_sync_dequeue_batch_with_key_prefix():
     assert status.processing_count == 3
 
 
-def test_sync_enqueue_batch_with_keys():
+def test_sync_enqueue_batch_with_key():
     queue = SyncMemoryQueue()
     
-    # Enqueue batch with different keys
-    items = [
-        ("user_task_1", 1, "user:123"),
-        ("admin_task", 2, "admin:456"),
-        ("general_task", 3, None),
-    ]
-    queue.enqueue_batch_with_keys(items)
+    # Enqueue batches with different keys and priorities
+    queue.enqueue_batch(["user_task_1"], priority=1, key="user:123")
+    queue.enqueue_batch(["admin_task"], priority=2, key="admin:456")
+    queue.enqueue_batch(["general_task"], priority=3, key=None)
     
     status = queue.get_status()
     assert status.pending_count == 3
@@ -1035,16 +1034,13 @@ async def test_async_dequeue_batch_with_key_prefix():
 
 
 @pytest.mark.asyncio
-async def test_async_enqueue_batch_with_keys():
+async def test_async_enqueue_batch_with_key():
     queue = AsyncMemoryQueue()
     
-    # Enqueue batch with different keys
-    items = [
-        ("user_task_1", 1, "user:123"),
-        ("admin_task", 2, "admin:456"),
-        ("general_task", 3, None),
-    ]
-    await queue.enqueue_batch_with_keys(items)
+    # Enqueue batches with different keys and priorities
+    await queue.enqueue_batch(["user_task_1"], priority=1, key="user:123")
+    await queue.enqueue_batch(["admin_task"], priority=2, key="admin:456")
+    await queue.enqueue_batch(["general_task"], priority=3, key=None)
     
     status = await queue.get_status()
     assert status.pending_count == 3

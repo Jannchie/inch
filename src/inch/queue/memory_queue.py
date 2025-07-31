@@ -37,25 +37,9 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
             heapq.heappush(self._key_queues[key], (-priority, self._counter, message))
             self._counter += 1
 
-    def enqueue_batch(self, items: list[tuple[T, int]]) -> None:
+    def enqueue_batch(self, items: list[T], priority: int = 0, key: str | None = None) -> None:
         with self._not_full:
-            for data, priority in items:
-                # Wait until queue is not full
-                while self._is_full():
-                    self._not_full.wait()
-
-                message = Message(data, priority=priority, key=None)
-                message.status = MessageStatus.PENDING
-
-                # Add to general queue (None key)
-                if None not in self._key_queues:
-                    self._key_queues[None] = []
-                heapq.heappush(self._key_queues[None], (-priority, self._counter, message))
-                self._counter += 1
-
-    def enqueue_batch_with_keys(self, items: list[tuple[T, int, str | None]]) -> None:
-        with self._not_full:
-            for data, priority, key in items:
+            for data in items:
                 # Wait until queue is not full
                 while self._is_full():
                     self._not_full.wait()
@@ -68,6 +52,7 @@ class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):
                     self._key_queues[key] = []
                 heapq.heappush(self._key_queues[key], (-priority, self._counter, message))
                 self._counter += 1
+
 
     def _is_full(self) -> bool:
         if self.max_size is None:

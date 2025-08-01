@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from inch.aio.queue.sql_queue import AsyncSQLQueue
-from inch.queue.base import MessageStatus
+from inch.types import MessageStatus
 from inch.queue.sql_queue import SyncSQLQueue
 
 

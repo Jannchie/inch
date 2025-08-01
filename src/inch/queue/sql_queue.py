@@ -8,9 +8,9 @@ from typing import Generic
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from inch.types import T
+from inch.types import Message, MessageStatus, QueueStatus, T
 
-from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
+from .base import SyncBaseQueue
 
 
 class Base(DeclarativeBase):
@@ -28,7 +28,7 @@ class QueueMessage(Base):
     key = Column(String, nullable=True, index=True)
     retry_count = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     processing_until = Column(DateTime, nullable=True, index=True)
     counter = Column(Integer, nullable=False)
 

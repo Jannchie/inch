@@ -8,8 +8,7 @@ from typing import Any, Generic
 
 import redis.asyncio as redis
 
-from inch.queue.base import Message, MessageStatus, QueueStatus
-from inch.types import T
+from inch.types import Message, MessageStatus, QueueStatus, T
 
 from .base import AsyncBaseQueue
 

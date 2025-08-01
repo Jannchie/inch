@@ -6,8 +6,7 @@ from logging import getLogger
 from typing import Generic
 
 from inch.aio.queue import AsyncBaseQueue
-from inch.queue import Message, MessageStatus, QueueStatus
-from inch.types import InFlightMessage, T
+from inch.types import InFlightMessage, Message, MessageStatus, QueueStatus, T
 
 
 class AsyncMemoryQueue(AsyncBaseQueue[T], Generic[T]):

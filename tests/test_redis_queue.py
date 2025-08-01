@@ -7,7 +7,7 @@ import redis
 import redis.asyncio as aioredis
 
 from inch.aio.queue.redis_queue import AsyncRedisQueue
-from inch.queue.base import MessageStatus
+from inch.types import MessageStatus
 from inch.queue.redis_queue import SyncRedisQueue
 
 

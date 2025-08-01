@@ -5,9 +5,9 @@ import uuid
 from logging import getLogger
 from typing import Generic
 
-from inch.types import InFlightMessage, T
+from inch.types import InFlightMessage, Message, MessageStatus, QueueStatus, T
 
-from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
+from .base import SyncBaseQueue
 
 
 class SyncMemoryQueue(SyncBaseQueue[T], Generic[T]):

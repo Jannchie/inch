@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from logging import getLogger
 from typing import Generic
@@ -8,9 +9,8 @@ from typing import Generic
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from inch.queue.base import Message, MessageStatus, QueueStatus
 from inch.queue.sql_queue import Base, QueueMessage
-from inch.types import T
+from inch.types import Message, MessageStatus, QueueStatus, T
 
 from .base import AsyncBaseQueue
 
@@ -107,7 +107,7 @@ class AsyncSQLQueue(AsyncBaseQueue[T], Generic[T]):
                     session.add(queue_message)
                     await session.commit()
 
-    async def enqueue_batch_with_keys(self, items: list[tuple[T, int, str | None]]) -> None:
+    async def enqueue_batch_with_keys(self, items: Sequence[tuple[T, int, str | None]]) -> None:
         await self._ensure_tables()
         async with self._not_full:
             for data, priority, key in items:

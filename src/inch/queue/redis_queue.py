@@ -8,9 +8,9 @@ from typing import Any, Generic
 
 import redis
 
-from inch.types import T
+from inch.types import Message, MessageStatus, QueueStatus, T
 
-from .base import Message, MessageStatus, QueueStatus, SyncBaseQueue
+from .base import SyncBaseQueue
 
 # Lua script for atomic dequeue operation
 DEQUEUE_SCRIPT = """

@@ -79,3 +79,8 @@ dev = [
 
 [tool.coverage.run]
 omit = ["tests/*"]
+
+[tool.pytest.ini_options]
+markers = [
+    "performance: marks tests as performance benchmarks (may be slow)",
+]

@@ -1,36 +1,11 @@
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
+from collections.abc import Sequence
 from typing import Generic, TypeVar
 
+from inch.types import Message, QueueStatus
+
 T = TypeVar("T")
-
-
-class MessageStatus(Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    SUCCESS = "success"
-    DEAD_LETTER = "dead_letter"
-
-
-@dataclass
-class Message(Generic[T]):
-    data: T
-    message_id: uuid.UUID = field(default_factory=uuid.uuid4)
-    status: MessageStatus = field(default=MessageStatus.PENDING)
-    retry_count: int = field(default=0)
-    error_message: str | None = field(default=None)
-    priority: int = field(default=0)
-    key: str | None = field(default=None)
-
-
-@dataclass
-class QueueStatus:
-    pending_count: int
-    processing_count: int
-    success_count: int
-    dead_letter_count: int
 
 
 class SyncBaseQueue(ABC, Generic[T]):
@@ -57,13 +32,13 @@ class SyncBaseQueue(ABC, Generic[T]):
     def ack(self, message_id: uuid.UUID) -> None: ...
 
     @abstractmethod
-    def ack_batch(self, message_ids: list[uuid.UUID]) -> None: ...
+    def ack_batch(self, message_ids: Sequence[uuid.UUID]) -> None: ...
 
     @abstractmethod
     def nack(self, message_id: uuid.UUID, error: str | None = None) -> None: ...
 
     @abstractmethod
-    def nack_batch(self, message_ids: list[uuid.UUID], error: str | None = None) -> None: ...
+    def nack_batch(self, message_ids: Sequence[uuid.UUID], error: str | None = None) -> None: ...
 
     @abstractmethod
     def get_status(self, key_prefix: str | None = None) -> QueueStatus: ...
